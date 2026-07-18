@@ -2,7 +2,6 @@
     "recommendations": [
         "rust-lang.rust-analyzer",
         "ms-vscode.cpptools",
-        "tamasfe.even-better-toml",
-        "kilocode.kilo-code"
+        "tamasfe.even-better-toml"
     ]
 }
