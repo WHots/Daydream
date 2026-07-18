@@ -1,0 +1,11 @@
+{
+    // Run clippy (instead of `cargo check`) for richer diagnostics on save.
+    "rust-analyzer.check.command": "clippy",
+    // Match the pinned MSVC target so analysis reflects the real build.
+    "rust-analyzer.cargo.target": "x86_64-pc-windows-msvc",
+    "[rust]": {
+        // Disabled so the hand-written Allman brace style is not reformatted
+        // to rustfmt's default same-line style.
+        "editor.formatOnSave": false
+    }
+}

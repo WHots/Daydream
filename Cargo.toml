@@ -1,0 +1,28 @@
+[package]
+name = "daydream"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde_json = "1.0"
+
+# Microsoft's official low-level Windows API bindings.
+# A version range (instead of a caret requirement) is recommended by the crate
+# authors to avoid duplicate versions in downstream graphs.
+# Each Win32 area must be opted into explicitly via a feature flag.
+[dependencies.windows-sys]
+version = ">=0.59, <=0.61"
+features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+    "Win32_System_Console",
+    "Win32_Storage_FileSystem",
+    "Win32_System_SystemServices",
+    "Win32_System_SystemInformation",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_Security_Cryptography",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_Memory",
+]

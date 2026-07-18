@@ -1,0 +1,8 @@
+# Build artifacts
+/target
+
+# rustfmt backups
+**/*.rs.bk
+
+# MSVC debugger / linker leftovers
+*.pdb
