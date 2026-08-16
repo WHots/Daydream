@@ -1,14 +1,12 @@
-use windows_sys::Win32::System::Diagnostics::Debug::{
-    IMAGE_DIRECTORY_ENTRY_EXCEPTION, IMAGE_SCN_CNT_CODE, IMAGE_SCN_MEM_DISCARDABLE,
-    IMAGE_SCN_MEM_EXECUTE, IMAGE_SCN_MEM_READ, IMAGE_SCN_MEM_WRITE,
-};
+use windows_sys::Win32::System::Diagnostics::Debug::{IMAGE_DIRECTORY_ENTRY_EXCEPTION, IMAGE_SCN_CNT_CODE, IMAGE_SCN_MEM_DISCARDABLE, IMAGE_SCN_MEM_EXECUTE, IMAGE_SCN_MEM_READ, IMAGE_SCN_MEM_WRITE};
 
 use super::foundation::validate_pe;
-
 
 /// Byte size of one x64 runtime-function table entry.
 const RUNTIME_FUNCTION_ENTRY_SIZE: usize = 12;
 
+/// Maximum x64 runtime-function entries retained from one image.
+const MAXIMUM_RUNTIME_FUNCTION_COUNT: usize = 500_000;
 
 /// Expresses how strongly independent PE signals support the selected primary code section.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -27,6 +25,15 @@ pub enum RuntimeFunctionEvidence
     NotPresent,
     Valid,
     Invalid,
+}
+
+
+/// Describes one validated x64 runtime-function code interval.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeFunctionRange
+{
+    pub begin_rva: usize,
+    pub end_rva: usize,
 }
 
 
@@ -60,6 +67,7 @@ pub struct CodeSectionAnalysis
     pub section_layout_valid: bool,
     pub overlapping_sections: bool,
     pub runtime_function_evidence: RuntimeFunctionEvidence,
+    pub runtime_functions: Vec<RuntimeFunctionRange>,
 }
 
 
@@ -123,10 +131,8 @@ pub fn locate_text_section(pe_data: &[u8]) -> Option<CodeSectionAnalysis>
         let name_length = section.Name.iter().position(|byte| *byte == 0).unwrap_or(section.Name.len());
         let name = String::from_utf8_lossy(&section.Name[..name_length]).into_owned().into_boxed_str();
 
-        candidates.push(CodeSectionCandidate
-        {
-            location: CodeSectionLocation
-            {
+        candidates.push(CodeSectionCandidate {
+            location: CodeSectionLocation {
                 name,
                 rva,
                 virtual_size,
@@ -148,7 +154,7 @@ pub fn locate_text_section(pe_data: &[u8]) -> Option<CodeSectionAnalysis>
         return None;
     }
 
-    let runtime_function_evidence = collect_runtime_function_evidence(pe_data, &pe, &mut candidates);
+    let (runtime_function_evidence, runtime_functions) = collect_runtime_function_evidence(pe_data, &pe, &mut candidates);
     let runtime_metadata_valid = runtime_function_evidence == RuntimeFunctionEvidence::Valid;
 
     if runtime_function_evidence == RuntimeFunctionEvidence::Invalid
@@ -168,31 +174,24 @@ pub fn locate_text_section(pe_data: &[u8]) -> Option<CodeSectionAnalysis>
         candidate.score = score_code_section(candidate, runtime_metadata_valid, largest_runtime_function_count, largest_runtime_code_bytes);
     }
 
-    let is_code_candidate = |candidate: &&CodeSectionCandidate|
-    {
+    let is_code_candidate = |candidate: &&CodeSectionCandidate| {
         let characteristics = candidate.location.characteristics;
 
         characteristics & (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE) != 0 || (runtime_metadata_valid && candidate.location.runtime_function_count != 0)
     };
     let mut ranked_candidates: Vec<&CodeSectionCandidate> = candidates.iter().filter(is_code_candidate).collect();
 
-    ranked_candidates.sort_unstable_by(|left, right|
-    {
-        right.score.cmp(&left.score).then_with(|| right.location.runtime_function_count.cmp(&left.location.runtime_function_count)).then_with(|| right.location.runtime_code_bytes.cmp(&left.location.runtime_code_bytes)).then_with(|| right.location.mapped_size.cmp(&left.location.mapped_size)).then_with(|| left.location.rva.cmp(&right.location.rva))
-    });
+    ranked_candidates.sort_unstable_by(|left, right| right.score.cmp(&left.score).then_with(|| right.location.runtime_function_count.cmp(&left.location.runtime_function_count)).then_with(|| right.location.runtime_code_bytes.cmp(&left.location.runtime_code_bytes)).then_with(|| right.location.mapped_size.cmp(&left.location.mapped_size)).then_with(|| left.location.rva.cmp(&right.location.rva)));
 
     let primary_candidate = *ranked_candidates.first()?;
     let runner_up_score = ranked_candidates.get(1).map(|candidate| candidate.score);
     let candidate_count = ranked_candidates.len();
     let overlapping_sections = has_overlapping_sections(&candidates);
     let confidence = classify_code_section_confidence(primary_candidate, runner_up_score, runtime_function_evidence, image_complete, section_ranges_valid, section_layout_valid, overlapping_sections, entry_point_rva);
-    let entry_point = candidates.iter().filter(|candidate| candidate.location.contains_entry_point).max_by(|left, right|
-    {
-        left.score.cmp(&right.score).then_with(|| left.location.runtime_function_count.cmp(&right.location.runtime_function_count)).then_with(|| right.location.rva.cmp(&left.location.rva))
-    }).map(|candidate| candidate.location.clone());
 
-    Some(CodeSectionAnalysis
-    {
+    let entry_point = candidates.iter().filter(|candidate| candidate.location.contains_entry_point).max_by(|left, right| left.score.cmp(&right.score).then_with(|| left.location.runtime_function_count.cmp(&right.location.runtime_function_count)).then_with(|| right.location.rva.cmp(&left.location.rva))).map(|candidate| candidate.location.clone());
+
+    Some(CodeSectionAnalysis {
         primary: primary_candidate.location.clone(),
         entry_point,
         confidence,
@@ -202,6 +201,7 @@ pub fn locate_text_section(pe_data: &[u8]) -> Option<CodeSectionAnalysis>
         section_layout_valid,
         overlapping_sections,
         runtime_function_evidence,
+        runtime_functions,
     })
 }
 
@@ -212,32 +212,32 @@ pub fn locate_text_section(pe_data: &[u8]) -> Option<CodeSectionAnalysis>
 /// `candidates`: structurally valid sections receiving function counts and covered bytes.
 ///
 /// Returns whether exception metadata is absent, valid, or structurally inconsistent.
-fn collect_runtime_function_evidence(pe_data: &[u8], pe: &validate_pe::PeImage, candidates: &mut [CodeSectionCandidate]) -> RuntimeFunctionEvidence
+fn collect_runtime_function_evidence(pe_data: &[u8], pe: &validate_pe::PeImage, candidates: &mut [CodeSectionCandidate]) -> (RuntimeFunctionEvidence, Vec<RuntimeFunctionRange>)
 {
     let nt_headers = &pe.nt_headers;
     let directory = match validate_pe::get_data_directory(pe, IMAGE_DIRECTORY_ENTRY_EXCEPTION as usize)
     {
         Some(value) => value,
-        None => return RuntimeFunctionEvidence::NotPresent,
+        None => return (RuntimeFunctionEvidence::NotPresent, Vec::new()),
     };
     let directory_rva = directory.VirtualAddress as usize;
     let directory_size = directory.Size as usize;
 
     if directory_rva == 0 && directory_size == 0
     {
-        return RuntimeFunctionEvidence::NotPresent;
+        return (RuntimeFunctionEvidence::NotPresent, Vec::new());
     }
 
     if directory_rva == 0 || directory_size == 0
     {
         eprintln!("x64 exception directory has an incomplete RVA or size");
-        return RuntimeFunctionEvidence::Invalid;
+        return (RuntimeFunctionEvidence::Invalid, Vec::new());
     }
 
     if directory_rva % 4 != 0
     {
         eprintln!("x64 exception directory is not DWORD aligned");
-        return RuntimeFunctionEvidence::Invalid;
+        return (RuntimeFunctionEvidence::Invalid, Vec::new());
     }
 
     let directory_end = match directory_rva.checked_add(directory_size)
@@ -246,18 +246,33 @@ fn collect_runtime_function_evidence(pe_data: &[u8], pe: &validate_pe::PeImage, 
         _ =>
         {
             eprintln!("x64 exception directory exceeds the mapped PE image");
-            return RuntimeFunctionEvidence::Invalid;
+            return (RuntimeFunctionEvidence::Invalid, Vec::new());
         }
     };
 
     if !candidates.iter().any(|candidate| directory_rva >= candidate.location.rva && directory_end <= candidate.end_rva)
     {
         eprintln!("x64 exception directory is not contained by a mapped PE section");
-        return RuntimeFunctionEvidence::Invalid;
+        return (RuntimeFunctionEvidence::Invalid, Vec::new());
     }
 
     let mut metadata_valid = directory_size % RUNTIME_FUNCTION_ENTRY_SIZE == 0;
     let mut previous_begin_rva = None;
+    let mut previous_end_rva = None;
+    let mut runtime_functions = Vec::new();
+    let runtime_function_count = directory_size / RUNTIME_FUNCTION_ENTRY_SIZE;
+
+    if runtime_function_count > MAXIMUM_RUNTIME_FUNCTION_COUNT
+    {
+        eprintln!("x64 runtime-function count exceeds the safe decode-seed limit");
+        return (RuntimeFunctionEvidence::Invalid, Vec::new());
+    }
+
+    if runtime_functions.try_reserve_exact(runtime_function_count).is_err()
+    {
+        eprintln!("failed to allocate the x64 runtime-function range buffer");
+        return (RuntimeFunctionEvidence::Invalid, Vec::new());
+    }
 
     for entry in pe_data[directory_rva..directory_end].chunks_exact(RUNTIME_FUNCTION_ENTRY_SIZE)
     {
@@ -271,12 +286,13 @@ fn collect_runtime_function_evidence(pe_data: &[u8], pe: &validate_pe::PeImage, 
             continue;
         }
 
-        if previous_begin_rva.is_some_and(|previous| begin_rva <= previous)
+        if previous_begin_rva.is_some_and(|previous| begin_rva <= previous) || previous_end_rva.is_some_and(|previous| begin_rva < previous)
         {
             metadata_valid = false;
         }
 
         previous_begin_rva = Some(begin_rva);
+        previous_end_rva = Some(end_rva);
 
         if !validate_unwind_info(pe_data, nt_headers.OptionalHeader.SizeOfImage as usize, candidates, unwind_info_rva)
         {
@@ -288,7 +304,7 @@ fn collect_runtime_function_evidence(pe_data: &[u8], pe: &validate_pe::PeImage, 
 
         for (section_index, candidate) in candidates.iter().enumerate()
         {
-            if begin_rva < candidate.location.rva || end_rva > candidate.end_rva
+            if candidate.location.characteristics & IMAGE_SCN_MEM_EXECUTE == 0 || begin_rva < candidate.location.rva || end_rva > candidate.end_rva
             {
                 continue;
             }
@@ -316,15 +332,19 @@ fn collect_runtime_function_evidence(pe_data: &[u8], pe: &validate_pe::PeImage, 
 
         candidate.location.runtime_function_count += 1;
         candidate.location.runtime_code_bytes = candidate.location.runtime_code_bytes.saturating_add(end_rva - begin_rva);
+        runtime_functions.push(RuntimeFunctionRange {
+            begin_rva,
+            end_rva,
+        });
     }
 
     if !metadata_valid
     {
         eprintln!("x64 exception directory contains inconsistent function metadata");
-        return RuntimeFunctionEvidence::Invalid;
+        return (RuntimeFunctionEvidence::Invalid, Vec::new());
     }
 
-    RuntimeFunctionEvidence::Valid
+    (RuntimeFunctionEvidence::Valid, runtime_functions)
 }
 
 

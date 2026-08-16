@@ -11,7 +11,6 @@ use crate::core::file_ops::utils::validate::{validate_target_file, FileValidatio
 /// Default minimum printable character count for file-string collection.
 pub const DEFAULT_MINIMUM_FILE_STRING_LENGTH: usize = 4;
 
-
 /// Explains whether file processing failed during PE validation or JSON persistence.
 #[derive(Debug)]
 pub enum FileProcessingError
@@ -114,7 +113,6 @@ pub fn process_file(path: &Path, is_self_target: bool) -> Result<(), FileProcess
     Ok(())
 }
 
-
 impl fmt::Display for FileProcessingError
 {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result
@@ -126,7 +124,6 @@ impl fmt::Display for FileProcessingError
         }
     }
 }
-
 
 impl std::error::Error for FileProcessingError
 {
@@ -153,14 +150,7 @@ fn print_file_sections(sections: &[PeSectionInfo])
 
     for (index, section) in sections.iter().enumerate()
     {
-        let content = if section.content.is_empty()
-        {
-            String::from("None declared")
-        }
-        else
-        {
-            section.content.iter().map(|value| value.to_string()).collect::<Vec<String>>().join(", ")
-        };
+        let content = if section.content.is_empty() { String::from("None declared") } else { section.content.iter().map(|value| value.to_string()).collect::<Vec<String>>().join(", ") };
 
         println!("[{}] {:?} | RVA 0x{:08X} | Virtual size 0x{:X} | File offset 0x{:08X} | Raw size 0x{:X}", index, section.name, section.rva, section.virtual_size, section.file_offset, section.raw_size);
         println!("  Content {} | Memory {} | Characteristics 0x{:08X}", content, section.memory, section.characteristics);
@@ -234,8 +224,7 @@ fn print_debug_details(entry: &FileDebugEntry<'_>)
         {
             let pdb_path = match info
             {
-                FileCodeViewInfo::Rsds
-                {
+                FileCodeViewInfo::Rsds {
                     guid,
                     age,
                     path,
@@ -248,8 +237,7 @@ fn print_debug_details(entry: &FileDebugEntry<'_>)
                     Some(path.as_ref())
                 }
 
-                FileCodeViewInfo::Nb10
-                {
+                FileCodeViewInfo::Nb10 {
                     offset,
                     signature,
                     age,
@@ -283,7 +271,7 @@ fn print_debug_details(entry: &FileDebugEntry<'_>)
             }
         }
         FileDebugDetails::VcFeature(info) => println!("  VC feature counts: pre-VC11 {} | C/C++ {} | GS {} | SDL {} | guardN {}", info.pre_vc11, info.c_cpp, info.gs, info.sdl, info.guard_n),
-        
+
         FileDebugDetails::Pogo(info) =>
         {
             println!("  POGO signature {:?} | Groups {}", String::from_utf8_lossy(&info.signature), info.entries.len());
@@ -299,7 +287,7 @@ fn print_debug_details(entry: &FileDebugEntry<'_>)
         FileDebugDetails::PdbChecksum(info) => println!("  PDB checksum {:?}:{}", info.algorithm, encode_hex_preview(&info.checksum, 64)),
         FileDebugDetails::EmbeddedPortablePdb(info) => println!("  Embedded Portable PDB MPDB | Uncompressed {} | Compressed {}", info.uncompressed_size, info.compressed_size),
         FileDebugDetails::ExtendedDllCharacteristics(value) => println!("  Extended DLL characteristics 0x{:08X}", value),
-        
+
         FileDebugDetails::Raw =>
         {
             let data = entry.raw_data.unwrap_or_default();
@@ -313,7 +301,7 @@ fn print_debug_details(entry: &FileDebugEntry<'_>)
 
             println!("  Payload malformed; raw bytes preserved: {} | Hex {}", data.len(), encode_hex_preview(data, 64));
         }
-        
+
         FileDebugDetails::DecodeLimitExceeded => println!("  Typed payload decoding skipped by the decoded-data limit; raw bytes remain available"),
         FileDebugDetails::Unavailable => println!("  Payload unavailable"),
     }

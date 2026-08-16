@@ -82,7 +82,7 @@ information is not found in these.
     `utils/pdb.rs` (CodeView/NB10 debug directory → PDB GUID/path), `utils/strings.rs`
     (ASCII/UTF-8/UTF-16LE string extraction).
 - `internal/` — logic local to this process only (never touches other processes):
-  - `imports/imports.rs`, `saves/structure.rs`, `utils/handles.rs` (`CleanHandle` RAII handle wrapper).
+  - `imports/imports.rs`, `utils/handles.rs` (`CleanHandle` RAII handle wrapper).
 - `process_ops/` — operations acting on a target process:
   - `api_discovery/apidata.rs`; `utils/` process-scoped helpers: `memutils`, `pe_utils`,
     `pdbutils`, `processutils`, `strings`.
@@ -111,6 +111,7 @@ information is not found in these.
 
 - Large datasets, make sure they are properly stored, and free'd when needed.
 - Prefer performance and memory safety.
+- Avoid over-engineering workflows with straightforward usage. Prefer simple, performant implementations that remain easy to understand and maintain.
 
 ## Platform
 
@@ -119,6 +120,10 @@ This project targets Windows only. Do not add cross-platform guards - omit `#[cf
 ## Creating files
 
 Prompt the user for confirmation before creating any new file. Describe the file's path and purpose, and wait for approval before writing it. Editing existing files does not require this prompt.
+
+## Documentation maintenance
+
+- Whenever a file or project methodology/workflow is created, changed, or removed, review and update both `AGENTS.md` and `README.md` in the same change so they accurately reflect the current project.
 
 ## Editing guide
 

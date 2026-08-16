@@ -1,7 +1,10 @@
 use std::fmt;
-use std::fs;
-use std::io;
+use std::fs::OpenOptions;
+use std::io::{self, Read};
+use std::os::windows::fs::OpenOptionsExt;
 use std::path::Path;
+
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
 
 const IMAGE_FILE_EXECUTABLE_IMAGE: u16 = 0x0002;
 const IMAGE_FILE_DLL: u16 = 0x2000;
@@ -12,6 +15,7 @@ const PE_SIGNATURE_SIZE: usize = 4;
 const COFF_HEADER_SIZE: usize = 20;
 const OPTIONAL_HEADER64_MINIMUM_SIZE: usize = 112;
 const SECTION_HEADER_SIZE: usize = 40;
+const MAXIMUM_PE_FILE_SIZE: u64 = 0x1000_0000;
 
 /// Surface-level information about one section in a validated raw PE file.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -51,6 +55,11 @@ pub enum FileValidationError
     FileAccess(io::Error),
     NotRegularFile,
     FileTooSmall,
+    FileTooLarge
+    {
+        file_size: u64,
+        maximum_size: u64,
+    },
     InvalidDosSignature,
     InvalidNtHeaderOffset,
     InvalidNtSignature,
@@ -88,14 +97,35 @@ pub enum FileValidationError
 /// `FileValidationError` describing the first structural validation failure.
 pub fn validate_target_file(path: &Path) -> Result<ValidatedPeFile, FileValidationError>
 {
-    let metadata = fs::metadata(path).map_err(FileValidationError::FileAccess)?;
+    let mut file = OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(path).map_err(FileValidationError::FileAccess)?;
+    let metadata = file.metadata().map_err(FileValidationError::FileAccess)?;
 
     if !metadata.is_file()
     {
         return Err(FileValidationError::NotRegularFile);
     }
 
-    let bytes = fs::read(path).map_err(FileValidationError::FileAccess)?;
+    let metadata_size = metadata.len();
+
+    if metadata_size > MAXIMUM_PE_FILE_SIZE
+    {
+        return Err(FileValidationError::FileTooLarge {
+            file_size: metadata_size,
+            maximum_size: MAXIMUM_PE_FILE_SIZE,
+        });
+    }
+
+    let file_size = usize::try_from(metadata_size).map_err(|_| FileValidationError::FileAccess(io::Error::new(io::ErrorKind::InvalidData, "target file size does not fit in memory")))?;
+    let read_limit = metadata_size.checked_add(1).ok_or_else(|| FileValidationError::FileAccess(io::Error::new(io::ErrorKind::InvalidData, "target file read limit overflowed")))?;
+    let mut bytes = Vec::new();
+
+    bytes.try_reserve_exact(file_size).map_err(|_| FileValidationError::FileAccess(io::Error::new(io::ErrorKind::OutOfMemory, "failed to allocate the target file buffer")))?;
+    file.by_ref().take(read_limit).read_to_end(&mut bytes).map_err(FileValidationError::FileAccess)?;
+
+    if bytes.len() != file_size
+    {
+        return Err(FileValidationError::FileAccess(io::Error::new(io::ErrorKind::InvalidData, "target file size changed while it was being read")));
+    }
 
     if bytes.len() < DOS_HEADER_MINIMUM_SIZE
     {
@@ -107,15 +137,9 @@ pub fn validate_target_file(path: &Path) -> Result<ValidatedPeFile, FileValidati
         return Err(FileValidationError::InvalidDosSignature);
     }
 
-    let nt_header_offset = read_u32(&bytes, 0x3C)
-        .and_then(|value| usize::try_from(value).ok())
-        .ok_or(FileValidationError::InvalidNtHeaderOffset)?;
-    let coff_header_offset = nt_header_offset
-        .checked_add(PE_SIGNATURE_SIZE)
-        .ok_or(FileValidationError::InvalidNtHeaderOffset)?;
-    let optional_header_offset = coff_header_offset
-        .checked_add(COFF_HEADER_SIZE)
-        .ok_or(FileValidationError::InvalidNtHeaderOffset)?;
+    let nt_header_offset = read_u32(&bytes, 0x3C).and_then(|value| usize::try_from(value).ok()).ok_or(FileValidationError::InvalidNtHeaderOffset)?;
+    let coff_header_offset = nt_header_offset.checked_add(PE_SIGNATURE_SIZE).ok_or(FileValidationError::InvalidNtHeaderOffset)?;
+    let optional_header_offset = coff_header_offset.checked_add(COFF_HEADER_SIZE).ok_or(FileValidationError::InvalidNtHeaderOffset)?;
 
     if bytes.get(nt_header_offset..coff_header_offset) != Some(b"PE\0\0")
     {
@@ -129,20 +153,16 @@ pub fn validate_target_file(path: &Path) -> Result<ValidatedPeFile, FileValidati
         return Err(FileValidationError::UnsupportedMachine(machine));
     }
 
-    let number_of_sections = read_u16(&bytes, coff_header_offset + 2)
-        .ok_or(FileValidationError::InvalidNtHeaderOffset)? as usize;
+    let number_of_sections = read_u16(&bytes, coff_header_offset + 2).ok_or(FileValidationError::InvalidNtHeaderOffset)? as usize;
 
     if number_of_sections == 0
     {
         return Err(FileValidationError::MissingSections);
     }
 
-    let timestamp = read_u32(&bytes, coff_header_offset + 4)
-        .ok_or(FileValidationError::InvalidNtHeaderOffset)?;
-    let optional_header_size = read_u16(&bytes, coff_header_offset + 16)
-        .ok_or(FileValidationError::InvalidNtHeaderOffset)? as usize;
-    let characteristics = read_u16(&bytes, coff_header_offset + 18)
-        .ok_or(FileValidationError::InvalidNtHeaderOffset)?;
+    let timestamp = read_u32(&bytes, coff_header_offset + 4).ok_or(FileValidationError::InvalidNtHeaderOffset)?;
+    let optional_header_size = read_u16(&bytes, coff_header_offset + 16).ok_or(FileValidationError::InvalidNtHeaderOffset)? as usize;
+    let characteristics = read_u16(&bytes, coff_header_offset + 18).ok_or(FileValidationError::InvalidNtHeaderOffset)?;
 
     if characteristics & IMAGE_FILE_EXECUTABLE_IMAGE == 0
     {
@@ -159,9 +179,7 @@ pub fn validate_target_file(path: &Path) -> Result<ValidatedPeFile, FileValidati
         return Err(FileValidationError::InvalidOptionalHeader);
     }
 
-    let optional_header_end = optional_header_offset
-        .checked_add(optional_header_size)
-        .ok_or(FileValidationError::InvalidOptionalHeader)?;
+    let optional_header_end = optional_header_offset.checked_add(optional_header_size).ok_or(FileValidationError::InvalidOptionalHeader)?;
 
     if optional_header_end > bytes.len()
     {
@@ -172,23 +190,15 @@ pub fn validate_target_file(path: &Path) -> Result<ValidatedPeFile, FileValidati
 
     if optional_header_magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC
     {
-        return Err(FileValidationError::UnsupportedOptionalHeader(
-            optional_header_magic,
-        ));
+        return Err(FileValidationError::UnsupportedOptionalHeader(optional_header_magic));
     }
 
-    let entry_point_rva = read_u32(&bytes, optional_header_offset + 16)
-        .ok_or(FileValidationError::InvalidOptionalHeader)? as usize;
-    let image_base = read_u64(&bytes, optional_header_offset + 24)
-        .ok_or(FileValidationError::InvalidOptionalHeader)?;
-    let section_alignment = read_u32(&bytes, optional_header_offset + 32)
-        .ok_or(FileValidationError::InvalidOptionalHeader)? as usize;
-    let file_alignment = read_u32(&bytes, optional_header_offset + 36)
-        .ok_or(FileValidationError::InvalidOptionalHeader)? as usize;
-    let size_of_image = read_u32(&bytes, optional_header_offset + 56)
-        .ok_or(FileValidationError::InvalidOptionalHeader)? as usize;
-    let size_of_headers = read_u32(&bytes, optional_header_offset + 60)
-        .ok_or(FileValidationError::InvalidOptionalHeader)? as usize;
+    let entry_point_rva = read_u32(&bytes, optional_header_offset + 16).ok_or(FileValidationError::InvalidOptionalHeader)? as usize;
+    let image_base = read_u64(&bytes, optional_header_offset + 24).ok_or(FileValidationError::InvalidOptionalHeader)?;
+    let section_alignment = read_u32(&bytes, optional_header_offset + 32).ok_or(FileValidationError::InvalidOptionalHeader)? as usize;
+    let file_alignment = read_u32(&bytes, optional_header_offset + 36).ok_or(FileValidationError::InvalidOptionalHeader)? as usize;
+    let size_of_image = read_u32(&bytes, optional_header_offset + 56).ok_or(FileValidationError::InvalidOptionalHeader)? as usize;
+    let size_of_headers = read_u32(&bytes, optional_header_offset + 60).ok_or(FileValidationError::InvalidOptionalHeader)? as usize;
 
     if size_of_image == 0
     {
@@ -202,19 +212,14 @@ pub fn validate_target_file(path: &Path) -> Result<ValidatedPeFile, FileValidati
 
     if entry_point_rva >= size_of_image
     {
-        return Err(FileValidationError::EntryPointOutOfRange
-        {
+        return Err(FileValidationError::EntryPointOutOfRange {
             entry_point_rva,
             size_of_image,
         });
     }
 
-    let section_table_size = number_of_sections
-        .checked_mul(SECTION_HEADER_SIZE)
-        .ok_or(FileValidationError::InvalidSectionTable)?;
-    let section_table_end = optional_header_end
-        .checked_add(section_table_size)
-        .ok_or(FileValidationError::InvalidSectionTable)?;
+    let section_table_size = number_of_sections.checked_mul(SECTION_HEADER_SIZE).ok_or(FileValidationError::InvalidSectionTable)?;
+    let section_table_end = optional_header_end.checked_add(section_table_size).ok_or(FileValidationError::InvalidSectionTable)?;
 
     if section_table_end > bytes.len()
     {
@@ -231,60 +236,41 @@ pub fn validate_target_file(path: &Path) -> Result<ValidatedPeFile, FileValidati
     for section_index in 0..number_of_sections
     {
         let section_offset = optional_header_end + section_index * SECTION_HEADER_SIZE;
-        let name_bytes = bytes
-            .get(section_offset..section_offset + 8)
-            .ok_or(FileValidationError::InvalidSectionTable)?;
-        let name = String::from_utf8_lossy(name_bytes)
-            .trim_end_matches('\0')
-            .to_string()
-            .into_boxed_str();
-        let virtual_size = read_u32(&bytes, section_offset + 8)
-            .ok_or(FileValidationError::InvalidSectionTable)? as usize;
-        let virtual_address = read_u32(&bytes, section_offset + 12)
-            .ok_or(FileValidationError::InvalidSectionTable)? as usize;
-        let raw_size = read_u32(&bytes, section_offset + 16)
-            .ok_or(FileValidationError::InvalidSectionTable)? as usize;
-        let raw_offset = read_u32(&bytes, section_offset + 20)
-            .ok_or(FileValidationError::InvalidSectionTable)? as usize;
-        let section_characteristics = read_u32(&bytes, section_offset + 36)
-            .ok_or(FileValidationError::InvalidSectionTable)?;
+        let name_bytes = bytes.get(section_offset..section_offset + 8).ok_or(FileValidationError::InvalidSectionTable)?;
+        let name = String::from_utf8_lossy(name_bytes).trim_end_matches('\0').to_string().into_boxed_str();
+        let virtual_size = read_u32(&bytes, section_offset + 8).ok_or(FileValidationError::InvalidSectionTable)? as usize;
+        let virtual_address = read_u32(&bytes, section_offset + 12).ok_or(FileValidationError::InvalidSectionTable)? as usize;
+        let raw_size = read_u32(&bytes, section_offset + 16).ok_or(FileValidationError::InvalidSectionTable)? as usize;
+        let raw_offset = read_u32(&bytes, section_offset + 20).ok_or(FileValidationError::InvalidSectionTable)? as usize;
+        let section_characteristics = read_u32(&bytes, section_offset + 36).ok_or(FileValidationError::InvalidSectionTable)?;
 
         if raw_size != 0
         {
-            let raw_end = raw_offset
-                .checked_add(raw_size)
-                .ok_or(FileValidationError::InvalidSectionRawRange
-                {
-                    section_index,
-                })?;
+            let raw_end = raw_offset.checked_add(raw_size).ok_or(FileValidationError::InvalidSectionRawRange {
+                section_index,
+            })?;
 
             if raw_end > bytes.len()
             {
-                return Err(FileValidationError::InvalidSectionRawRange
-                {
+                return Err(FileValidationError::InvalidSectionRawRange {
                     section_index,
                 });
             }
         }
 
         let virtual_span = virtual_size.max(raw_size);
-        let virtual_end = virtual_address
-            .checked_add(virtual_span)
-            .ok_or(FileValidationError::InvalidSectionVirtualRange
-            {
-                section_index,
-            })?;
+        let virtual_end = virtual_address.checked_add(virtual_span).ok_or(FileValidationError::InvalidSectionVirtualRange {
+            section_index,
+        })?;
 
         if virtual_end > size_of_image
         {
-            return Err(FileValidationError::InvalidSectionVirtualRange
-            {
+            return Err(FileValidationError::InvalidSectionVirtualRange {
                 section_index,
             });
         }
 
-        sections.push(PeFileSection
-        {
+        sections.push(PeFileSection {
             name,
             virtual_address,
             virtual_size,
@@ -294,8 +280,7 @@ pub fn validate_target_file(path: &Path) -> Result<ValidatedPeFile, FileValidati
         });
     }
 
-    Ok(ValidatedPeFile
-    {
+    Ok(ValidatedPeFile {
         bytes: bytes.into_boxed_slice(),
         machine,
         timestamp,
@@ -310,7 +295,6 @@ pub fn validate_target_file(path: &Path) -> Result<ValidatedPeFile, FileValidati
     })
 }
 
-
 impl fmt::Display for FileValidationError
 {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result
@@ -320,41 +304,48 @@ impl fmt::Display for FileValidationError
             Self::FileAccess(error) => write!(formatter, "file access failed: {error}"),
             Self::NotRegularFile => write!(formatter, "target is not a regular file"),
             Self::FileTooSmall => write!(formatter, "file is too small to contain a PE header"),
+            Self::FileTooLarge {
+                file_size,
+                maximum_size,
+            } => write!(formatter, "file size {file_size} exceeds the safe in-memory limit of {maximum_size} bytes"),
             Self::InvalidDosSignature => write!(formatter, "DOS MZ signature is invalid"),
             Self::InvalidNtHeaderOffset => write!(formatter, "NT header offset is invalid"),
             Self::InvalidNtSignature => write!(formatter, "PE signature is invalid"),
             Self::UnsupportedMachine(machine) =>
-                write!(formatter, "unsupported PE machine type 0x{machine:04X}"),
+            {
+                write!(formatter, "unsupported PE machine type 0x{machine:04X}")
+            }
             Self::MissingSections => write!(formatter, "PE file has no sections"),
             Self::InvalidOptionalHeader => write!(formatter, "PE optional header is invalid"),
             Self::UnsupportedOptionalHeader(magic) =>
-                write!(formatter, "unsupported optional-header magic 0x{magic:04X}"),
-            Self::NotExecutableImage => write!(formatter, "PE is not marked as an executable image"),
-            Self::DynamicLibrary => write!(formatter, "PE target is a DLL rather than an executable"),
+            {
+                write!(formatter, "unsupported optional-header magic 0x{magic:04X}")
+            }
+            Self::NotExecutableImage =>
+            {
+                write!(formatter, "PE is not marked as an executable image")
+            }
+            Self::DynamicLibrary =>
+            {
+                write!(formatter, "PE target is a DLL rather than an executable")
+            }
             Self::InvalidImageSize => write!(formatter, "PE image size is invalid"),
             Self::InvalidHeaderSize => write!(formatter, "PE header size is invalid"),
             Self::InvalidAlignment => write!(formatter, "PE file or section alignment is invalid"),
-            Self::EntryPointOutOfRange
-            {
+            Self::EntryPointOutOfRange {
                 entry_point_rva,
                 size_of_image,
-            } => write!(
-                formatter,
-                "entry-point RVA 0x{entry_point_rva:X} exceeds image size 0x{size_of_image:X}"
-            ),
+            } => write!(formatter, "entry-point RVA 0x{entry_point_rva:X} exceeds image size 0x{size_of_image:X}"),
             Self::InvalidSectionTable => write!(formatter, "PE section table is invalid"),
-            Self::InvalidSectionRawRange { section_index } => write!(
-                formatter,
-                "section {section_index} raw-data range exceeds the file"
-            ),
-            Self::InvalidSectionVirtualRange { section_index } => write!(
-                formatter,
-                "section {section_index} virtual range exceeds the image"
-            ),
+            Self::InvalidSectionRawRange {
+                section_index,
+            } => write!(formatter, "section {section_index} raw-data range exceeds the file"),
+            Self::InvalidSectionVirtualRange {
+                section_index,
+            } => write!(formatter, "section {section_index} virtual range exceeds the image"),
         }
     }
 }
-
 
 impl std::error::Error for FileValidationError
 {

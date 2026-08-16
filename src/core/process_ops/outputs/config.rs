@@ -8,7 +8,7 @@ use crate::core::global_utils::fileutils::{get_validated_file_stem, validate_sha
 pub const PROCESS_DUMP_MARKER: &str = "procdmp";
 
 /// Version written into every process-triage JSON document.
-pub const PROCESS_TRIAGE_SCHEMA_VERSION: u32 = 1;
+pub const PROCESS_TRIAGE_SCHEMA_VERSION: u32 = 2;
 
 /// Process dump directory containing PE-related results.
 pub const PE_DIRECTORY_NAME: &str = "PE";
@@ -55,7 +55,6 @@ pub const STRINGS_FILE_NAME: &str = "strings.json";
 /// Initial valid JSON content used until collected strings are persisted.
 const EMPTY_STRINGS_JSON: &[u8] = b"{\n  \"strings\": []\n}\n";
 
-
 /// Contains the fixed output locations for one completed process scan.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProcessDumpLayout
@@ -95,12 +94,12 @@ pub fn prepare_process_dump_layout(target_executable: &Path, sha256: &str) -> io
     match OpenOptions::new().write(true).create_new(true).open(&strings)
     {
         Ok(mut file) => file.write_all(EMPTY_STRINGS_JSON)?,
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists =>
+        {}
         Err(error) => return Err(error),
     }
 
-    Ok(ProcessDumpLayout
-    {
+    Ok(ProcessDumpLayout {
         root,
         pe,
         imports,

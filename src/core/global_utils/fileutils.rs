@@ -2,18 +2,12 @@ use core::ptr;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{self, File};
-use std::io::{self, BufWriter, Read, Write};
+use std::io::{self, BufWriter, Cursor, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
-
-use windows_sys::Win32::Security::Cryptography::{
-    BCryptCloseAlgorithmProvider, BCryptCreateHash, BCryptDestroyHash, BCryptFinishHash,
-    BCryptHashData, BCryptOpenAlgorithmProvider, BCRYPT_ALG_HANDLE, BCRYPT_HASH_HANDLE,
-    BCRYPT_SHA256_ALGORITHM,
-};
-
+use windows_sys::Win32::Security::Cryptography::{BCryptCloseAlgorithmProvider, BCryptCreateHash, BCryptDestroyHash, BCryptFinishHash, BCryptHashData, BCryptOpenAlgorithmProvider, BCRYPT_ALG_HANDLE, BCRYPT_HASH_HANDLE, BCRYPT_SHA256_ALGORITHM};
 
 /// Calculates the Shannon entropy of a file given its path.
 /// The Shannon entropy is a measure of the randomness or unpredictability of the file's content.
@@ -24,7 +18,6 @@ use windows_sys::Win32::Security::Cryptography::{
 /// Returns `Ok(f64)` with the calculated entropy if successful, or an `io::Error` if an error occurs.
 pub fn get_file_entropy(file_path: &OsStr) -> io::Result<f64>
 {
-
     let path = Path::new(file_path);
     let mut file = File::open(path)?;
 
@@ -73,14 +66,40 @@ pub fn get_file_sha256(exec_path: &OsStr) -> io::Result<String>
     let mut file = File::open(Path::new(exec_path))?;
 
     let mut algorithm: BCRYPT_ALG_HANDLE = ptr::null_mut();
+    // SAFETY: Every pointer is valid for the call, and the returned provider is closed below.
     let status = unsafe { BCryptOpenAlgorithmProvider(&mut algorithm, BCRYPT_SHA256_ALGORITHM, ptr::null(), 0) };
     if status < 0
     {
-        return Err(io::Error::new(io::ErrorKind::Other, format!("BCryptOpenAlgorithmProvider failed: {status:#x}")));
+        return Err(io::Error::other(format!("BCryptOpenAlgorithmProvider failed: {status:#x}")));
     }
 
-    let result = hash_file(&mut file, algorithm);
+    let result = hash_reader(&mut file, algorithm);
 
+    // SAFETY: `algorithm` was successfully opened above and is closed exactly once here.
+    unsafe { BCryptCloseAlgorithmProvider(algorithm, 0) };
+
+    result
+}
+
+
+/// Computes the SHA-256 digest of an already retained byte buffer.
+/// `data`: the exact bytes whose identity should be preserved without reopening a path.
+///
+/// Returns the lowercase hexadecimal digest, or an `io::Error` when CNG hashing fails.
+pub fn get_data_sha256(data: &[u8]) -> io::Result<String>
+{
+    let mut reader = Cursor::new(data);
+    let mut algorithm: BCRYPT_ALG_HANDLE = ptr::null_mut();
+    // SAFETY: Every pointer is valid for the call, and the returned provider is closed below.
+    let status = unsafe { BCryptOpenAlgorithmProvider(&mut algorithm, BCRYPT_SHA256_ALGORITHM, ptr::null(), 0) };
+    if status < 0
+    {
+        return Err(io::Error::other(format!("BCryptOpenAlgorithmProvider failed: {status:#x}")));
+    }
+
+    let result = hash_reader(&mut reader, algorithm);
+
+    // SAFETY: `algorithm` was successfully opened above and is closed exactly once here.
     unsafe { BCryptCloseAlgorithmProvider(algorithm, 0) };
 
     result
@@ -173,52 +192,58 @@ fn validate_file_name(file_name: &str) -> io::Result<()>
 }
 
 
-/// Streams an opened file through a CNG hash object and returns its hexadecimal digest.
-/// `file`: the opened file to read to completion and feed into the hash.
+/// Streams a reader through a CNG hash object and returns its hexadecimal digest.
+/// `reader`: the byte source to read to completion and feed into the hash.
 /// `algorithm`: an open BCrypt SHA-256 algorithm provider handle.
 ///
 /// Returns `Ok(String)` with the lowercase hexadecimal digest on success, or an `io::Error`
 /// if reading or any CNG hashing step fails. The hash object is always destroyed before return.
 #[inline(always)]
-fn hash_file(file: &mut File, algorithm: BCRYPT_ALG_HANDLE) -> io::Result<String>
+fn hash_reader(reader: &mut impl Read, algorithm: BCRYPT_ALG_HANDLE) -> io::Result<String>
 {
     let mut hash: BCRYPT_HASH_HANDLE = ptr::null_mut();
+    // SAFETY: `algorithm` is a live SHA-256 provider and the output handle pointer is valid.
     let status = unsafe { BCryptCreateHash(algorithm, &mut hash, ptr::null_mut(), 0, ptr::null(), 0, 0) };
     if status < 0
     {
-        return Err(io::Error::new(io::ErrorKind::Other, format!("BCryptCreateHash failed: {status:#x}")));
+        return Err(io::Error::other(format!("BCryptCreateHash failed: {status:#x}")));
     }
 
     let mut buffer = [0u8; 64 * 1024];
     loop
     {
-        let read = match file.read(&mut buffer)
+        let read = match reader.read(&mut buffer)
         {
             Ok(0) => break,
             Ok(count) => count,
             Err(error) =>
             {
+                // SAFETY: `hash` was successfully created above and is destroyed exactly once on this path.
                 unsafe { BCryptDestroyHash(hash) };
                 return Err(error);
             }
         };
 
+        // SAFETY: `hash` is live and `buffer[..read]` remains valid for the duration of the call.
         let status = unsafe { BCryptHashData(hash, buffer.as_ptr(), read as u32, 0) };
         if status < 0
         {
+            // SAFETY: `hash` was successfully created above and is destroyed exactly once on this path.
             unsafe { BCryptDestroyHash(hash) };
-            return Err(io::Error::new(io::ErrorKind::Other, format!("BCryptHashData failed: {status:#x}")));
+            return Err(io::Error::other(format!("BCryptHashData failed: {status:#x}")));
         }
     }
 
     let mut digest = [0u8; 32];
+    // SAFETY: `hash` is live and the complete digest output buffer is writable.
     let status = unsafe { BCryptFinishHash(hash, digest.as_mut_ptr(), digest.len() as u32, 0) };
 
+    // SAFETY: `hash` was successfully created above and is destroyed exactly once here.
     unsafe { BCryptDestroyHash(hash) };
 
     if status < 0
     {
-        return Err(io::Error::new(io::ErrorKind::Other, format!("BCryptFinishHash failed: {status:#x}")));
+        return Err(io::Error::other(format!("BCryptFinishHash failed: {status:#x}")));
     }
 
     Ok(to_hex(&digest))

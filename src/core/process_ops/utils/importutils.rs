@@ -4,7 +4,7 @@ use windows_sys::Win32::System::Diagnostics::Debug::{IMAGE_DIRECTORY_ENTRY_IMPOR
 
 use crate::core::process_ops::utils::foundation::validate_pe;
 use crate::core::process_ops::utils::pe_utils;
-use crate::core::process_ops::utils::processutils::{ProcessPeValidationError, ValidatedProcessPe};
+use crate::core::process_ops::utils::processutils::ValidatedProcessPe;
 
 /// High-bit mask identifying an ordinal import in an x64 thunk.
 const IMAGE_ORDINAL_FLAG64: u64 = 0x8000_0000_0000_0000;
@@ -84,12 +84,9 @@ pub struct ProcessImportCollection
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProcessImportCollectionError
 {
-    ProcessValidationFailed(ProcessPeValidationError),
-    InvalidMainModulePe(validate_pe::PeValidationError),
     IncompleteMainModuleSnapshot
     {
-        rva: usize,
-        size: usize,
+        rva: usize, size: usize
     },
 }
 
@@ -105,8 +102,7 @@ pub(crate) fn collect_process_imports_from_snapshot(process: &ValidatedProcessPe
 {
     if let Some(range) = find_unavailable_import_range(snapshot)
     {
-        return Err(ProcessImportCollectionError::IncompleteMainModuleSnapshot
-        {
+        return Err(ProcessImportCollectionError::IncompleteMainModuleSnapshot {
             rva: range.rva,
             size: range.size,
         });
@@ -114,8 +110,7 @@ pub(crate) fn collect_process_imports_from_snapshot(process: &ValidatedProcessPe
 
     let imports = collect_process_import_info(process.image.base_address, &snapshot.bytes, &snapshot.pe, progress);
 
-    Ok(ProcessImportCollection
-    {
+    Ok(ProcessImportCollection {
         module_base_address: process.image.base_address,
         module_size: process.image.image_size,
         imports,
@@ -175,14 +170,7 @@ fn find_unavailable_import_range(snapshot: &validate_pe::ValidatedPeSnapshot) ->
 
         // SAFETY: `OriginalFirstThunk` is the integer union member used for import lookup-table RVAs.
         let original_first_thunk = unsafe { descriptor.Anonymous.OriginalFirstThunk };
-        let lookup_table_rva = if original_first_thunk != 0
-        {
-            original_first_thunk as usize
-        }
-        else
-        {
-            descriptor.FirstThunk as usize
-        };
+        let lookup_table_rva = if original_first_thunk != 0 { original_first_thunk as usize } else { descriptor.FirstThunk as usize };
 
         if lookup_table_rva == 0 || descriptor.FirstThunk == 0
         {
@@ -409,8 +397,7 @@ fn build_process_import_info(module_base_address: usize, imports: Vec<PeImportEn
 
     for xref in xrefs
     {
-        xrefs_by_iat.entry(xref.iat_rva).or_default().push(ProcessImportXref
-        {
+        xrefs_by_iat.entry(xref.iat_rva).or_default().push(ProcessImportXref {
             kind: xref.kind,
             instruction_rva: xref.instruction_rva,
             instruction_address: module_base_address.checked_add(xref.instruction_rva),
@@ -424,8 +411,7 @@ fn build_process_import_info(module_base_address: usize, imports: Vec<PeImportEn
     {
         let iat_rva = import.iat_rva;
 
-        grouped.push(ProcessImportInfo
-        {
+        grouped.push(ProcessImportInfo {
             library_name: import.library_name,
             function_name: import.function_name,
             ordinal: import.ordinal,
@@ -456,8 +442,7 @@ fn collect_iat_xrefs_for_targets(pe_data: &[u8], pe: &validate_pe::PeImage, targ
     }
 
     let mut xrefs = Vec::new();
-    let total_bytes = pe.sections.iter().filter(|section| section.Characteristics & IMAGE_SCN_MEM_EXECUTE != 0).fold(0usize, |total, section|
-    {
+    let total_bytes = pe.sections.iter().filter(|section| section.Characteristics & IMAGE_SCN_MEM_EXECUTE != 0).fold(0usize, |total, section| {
         let section_start = section.VirtualAddress as usize;
         let section_size = validate_pe::get_mapped_section_size(section);
         let section_end = section_start.saturating_add(section_size).min(pe_data.len());
@@ -538,12 +523,7 @@ fn collect_iat_xrefs_in_range(pe_data: &[u8], pe: &validate_pe::PeImage, section
             }
         };
 
-        let displacement = i32::from_le_bytes([
-            pe_data[opcode_rva + 2],
-            pe_data[opcode_rva + 3],
-            pe_data[opcode_rva + 4],
-            pe_data[opcode_rva + 5],
-        ]);
+        let displacement = i32::from_le_bytes([pe_data[opcode_rva + 2], pe_data[opcode_rva + 3], pe_data[opcode_rva + 4], pe_data[opcode_rva + 5]]);
 
         let next_instruction_rva = opcode_rva + 6;
 
@@ -559,17 +539,9 @@ fn collect_iat_xrefs_in_range(pe_data: &[u8], pe: &validate_pe::PeImage, section
 
         if targets.contains(&iat_rva)
         {
-            let instruction_rva = if opcode_rva > section_start && matches!(pe_data[opcode_rva - 1], 0x40..=0x4F)
-            {
-                opcode_rva - 1
-            }
-            else
-            {
-                opcode_rva
-            };
+            let instruction_rva = if opcode_rva > section_start && matches!(pe_data[opcode_rva - 1], 0x40..=0x4F) { opcode_rva - 1 } else { opcode_rva };
 
-            xrefs.push(PeIatXref
-            {
+            xrefs.push(PeIatXref {
                 iat_rva,
                 instruction_rva,
                 file_offset: pe_utils::get_file_offset_from_pe(pe, instruction_rva),
@@ -643,14 +615,7 @@ fn collect_import_entries_from_descriptor(pe_data: &[u8], pe: &validate_pe::PeIm
 
     // SAFETY: `OriginalFirstThunk` is the integer union member used for import lookup-table RVAs.
     let original_first_thunk = unsafe { descriptor.Anonymous.OriginalFirstThunk };
-    let lookup_table_rva = if original_first_thunk != 0
-    {
-        original_first_thunk as usize
-    }
-    else
-    {
-        descriptor.FirstThunk as usize
-    };
+    let lookup_table_rva = if original_first_thunk != 0 { original_first_thunk as usize } else { descriptor.FirstThunk as usize };
 
     if lookup_table_rva == 0 || descriptor.FirstThunk == 0
     {
@@ -733,8 +698,7 @@ fn collect_import_entries_from_descriptor(pe_data: &[u8], pe: &validate_pe::PeIm
             None => break,
         };
 
-        imports.push(PeImportEntry
-        {
+        imports.push(PeImportEntry {
             library_name: library_name.into(),
             function_name,
             ordinal,

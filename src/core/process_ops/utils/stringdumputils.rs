@@ -1,14 +1,11 @@
 use windows_sys::Win32::Foundation::{GetLastError, HANDLE, NTSTATUS};
-use windows_sys::Win32::System::Memory::{
-    MEM_COMMIT, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY,
-    PAGE_GUARD, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
-};
+use windows_sys::Win32::System::Memory::{MEM_COMMIT, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY, PAGE_GUARD, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY};
 use windows_sys::Win32::System::Threading::GetProcessId;
 
 use crate::core::process_ops::utils::foundation::validate_pe::{self, ValidatedPeSnapshot};
 use crate::core::process_ops::utils::memutils::{self, MemoryRegion, MemoryRegionQueryError, ProcessMemoryReadError};
 use crate::core::process_ops::utils::pe_utils;
-use crate::core::process_ops::utils::processutils::{ProcessPeValidationError, ValidatedProcessPe};
+use crate::core::process_ops::utils::processutils::ValidatedProcessPe;
 use crate::core::process_ops::utils::strings::{self, StringEncoding};
 use crate::core::process_ops::utils::tebutils::ThreadTebInfo;
 
@@ -90,15 +87,6 @@ pub enum TebStackRegionReadError
 }
 
 
-/// Explains why main-module string collection could not complete.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum MainModuleStringCollectionError
-{
-    ProcessValidationFailed(ProcessPeValidationError),
-    InvalidMainModulePe(validate_pe::PeValidationError),
-}
-
-
 /// Explains why one TEB-described stack scan could not safely reach its next memory region.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TebStackStringCollectionError
@@ -165,16 +153,14 @@ pub fn collect_teb_stack_strings(process: HANDLE, teb: &ThreadTebInfo, minimum_c
         // SAFETY: `GetLastError` only reads the calling thread's last-error value.
         let error = unsafe { GetLastError() };
 
-        return Err(TebStackStringCollectionError::ProcessIdUnavailable
-        {
+        return Err(TebStackStringCollectionError::ProcessIdUnavailable {
             error,
         });
     }
 
     if teb.client_process_id != process_id as usize
     {
-        return Err(TebStackStringCollectionError::TebProcessIdentityMismatch
-        {
+        return Err(TebStackStringCollectionError::TebProcessIdentityMismatch {
             thread_id: teb.thread_id,
             process_id,
             teb_process_id: teb.client_process_id,
@@ -183,16 +169,14 @@ pub fn collect_teb_stack_strings(process: HANDLE, teb: &ThreadTebInfo, minimum_c
 
     if teb.stack_limit == 0 || teb.stack_base == 0 || teb.stack_limit >= teb.stack_base
     {
-        return Err(TebStackStringCollectionError::InvalidStackBounds
-        {
+        return Err(TebStackStringCollectionError::InvalidStackBounds {
             thread_id: teb.thread_id,
             stack_base: teb.stack_base,
             stack_limit: teb.stack_limit,
         });
     }
 
-    let mut collection = TebStackStringCollection
-    {
+    let mut collection = TebStackStringCollection {
         thread_id: teb.thread_id,
         teb_address: teb.teb_address,
         stack_base: teb.stack_base,
@@ -208,17 +192,12 @@ pub fn collect_teb_stack_strings(process: HANDLE, teb: &ThreadTebInfo, minimum_c
 
     while address < teb.stack_base
     {
-        let region = memutils::query_region(process, address).map_err(|error|
-        {
-            TebStackStringCollectionError::StackRegionQueryFailed
-            {
-                thread_id: teb.thread_id,
-                address,
-                error,
-            }
+        let region = memutils::query_region(process, address).map_err(|error| TebStackStringCollectionError::StackRegionQueryFailed {
+            thread_id: teb.thread_id,
+            address,
+            error,
         })?;
-        let region_end = region.base_address.checked_add(region.region_size).ok_or(TebStackStringCollectionError::StackRegionRangeOverflow
-        {
+        let region_end = region.base_address.checked_add(region.region_size).ok_or(TebStackStringCollectionError::StackRegionRangeOverflow {
             thread_id: teb.thread_id,
             base_address: region.base_address,
             region_size: region.region_size,
@@ -227,8 +206,7 @@ pub fn collect_teb_stack_strings(process: HANDLE, teb: &ThreadTebInfo, minimum_c
 
         if region.base_address > address || read_end <= address
         {
-            return Err(TebStackStringCollectionError::StackRegionDidNotAdvance
-            {
+            return Err(TebStackStringCollectionError::StackRegionDidNotAdvance {
                 thread_id: teb.thread_id,
                 address,
                 region_base_address: region.base_address,
@@ -244,8 +222,7 @@ pub fn collect_teb_stack_strings(process: HANDLE, teb: &ThreadTebInfo, minimum_c
                 Ok(value) => value,
                 Err(error) =>
                 {
-                    collection.failures.push(TebStackRegionFailure
-                    {
+                    collection.failures.push(TebStackRegionFailure {
                         address,
                         bytes_requested,
                         error: TebStackRegionReadError::ReadFailed(error),
@@ -259,12 +236,10 @@ pub fn collect_teb_stack_strings(process: HANDLE, teb: &ThreadTebInfo, minimum_c
 
             if region_read.bytes.len() != bytes_requested
             {
-                collection.failures.push(TebStackRegionFailure
-                {
+                collection.failures.push(TebStackRegionFailure {
                     address,
                     bytes_requested,
-                    error: TebStackRegionReadError::ReadIncomplete
-                    {
+                    error: TebStackRegionReadError::ReadIncomplete {
                         status: region_read.status,
                         bytes_read: region_read.bytes.len(),
                     },
@@ -273,8 +248,7 @@ pub fn collect_teb_stack_strings(process: HANDLE, teb: &ThreadTebInfo, minimum_c
 
             collection.bytes_read += region_read.bytes.len();
             let completed_before_region = address - teb.stack_limit;
-            let decoded_strings = collect_buffer_strings(&region_read.bytes, minimum_chars, &mut |completed, _|
-            {
+            let decoded_strings = collect_buffer_strings(&region_read.bytes, minimum_chars, &mut |completed, _| {
                 progress(completed_before_region.saturating_add(completed), total_stack_bytes);
             });
 
@@ -282,8 +256,7 @@ pub fn collect_teb_stack_strings(process: HANDLE, teb: &ThreadTebInfo, minimum_c
             {
                 let string_address = address + decoded.offset;
 
-                collection.strings.push(TebStackString
-                {
+                collection.strings.push(TebStackString {
                     thread_id: teb.thread_id,
                     value: decoded.value,
                     encoding: decoded.encoding,
@@ -317,8 +290,7 @@ pub(crate) fn collect_main_module_strings_from_snapshot(process: &ValidatedProce
 
     for decoded in decoded_strings
     {
-        records.push(MainModuleString
-        {
+        records.push(MainModuleString {
             value: decoded.value,
             encoding: decoded.encoding,
             address: process.image.base_address + decoded.offset,
@@ -327,8 +299,7 @@ pub(crate) fn collect_main_module_strings_from_snapshot(process: &ValidatedProce
         });
     }
 
-    MainModuleStringCollection
-    {
+    MainModuleStringCollection {
         module_base_address: process.image.base_address,
         module_size: process.image.image_size,
         strings: records,
@@ -404,8 +375,7 @@ fn read_string_candidate(data: &[u8], offset: usize) -> Option<DecodedString>
 
     if utf16le_length > 0
     {
-        return Some(DecodedString
-        {
+        return Some(DecodedString {
             value: strings::read_utf16le(data, offset)?.into_boxed_str(),
             encoding: StringEncoding::Utf16Le,
             offset,
@@ -423,8 +393,7 @@ fn read_string_candidate(data: &[u8], offset: usize) -> Option<DecodedString>
         {
             if value.len() > ascii_length
             {
-                return Some(DecodedString
-                {
+                return Some(DecodedString {
                     byte_length: value.len(),
                     character_count: value.chars().count(),
                     value: value.into_boxed_str(),
@@ -440,8 +409,7 @@ fn read_string_candidate(data: &[u8], offset: usize) -> Option<DecodedString>
         return None;
     }
 
-    Some(DecodedString
-    {
+    Some(DecodedString {
         value: strings::read_ascii(data, offset)?.into_boxed_str(),
         encoding: StringEncoding::Ascii,
         offset,
@@ -479,13 +447,5 @@ fn is_readable_region(region: &MemoryRegion) -> bool
         return false;
     }
 
-    matches!(
-        region.protect & PAGE_BASE_PROTECTION_MASK,
-        PAGE_READONLY
-            | PAGE_READWRITE
-            | PAGE_WRITECOPY
-            | PAGE_EXECUTE_READ
-            | PAGE_EXECUTE_READWRITE
-            | PAGE_EXECUTE_WRITECOPY
-    )
+    matches!(region.protect & PAGE_BASE_PROTECTION_MASK, PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)
 }

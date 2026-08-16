@@ -210,20 +210,16 @@ pub fn collect_file_debug_directory<'a>(file: &'a ValidatedPeFile) -> Vec<FileDe
     };
     let mapped_size = directory_mapped_end - directory_file_offset;
     let readable_size = directory_size.min(mapped_size);
-    let entry_count = (readable_size / DEBUG_DIRECTORY_ENTRY_SIZE)
-        .min(MAX_DEBUG_DIRECTORY_ENTRIES);
+    let entry_count = (readable_size / DEBUG_DIRECTORY_ENTRY_SIZE).min(MAX_DEBUG_DIRECTORY_ENTRIES);
     let mut entries = Vec::with_capacity(entry_count);
-    let mut parse_budget = DebugParseBudget
-    {
+    let mut parse_budget = DebugParseBudget {
         decoded_bytes: file.bytes.len().min(MAX_DECODED_DEBUG_BYTES),
         scanned_bytes: file.bytes.len().min(MAX_SCANNED_DEBUG_BYTES),
     };
 
     for index in 0..entry_count
     {
-        let entry_rva = match index
-            .checked_mul(DEBUG_DIRECTORY_ENTRY_SIZE)
-            .and_then(|offset| directory_rva.checked_add(offset))
+        let entry_rva = match index.checked_mul(DEBUG_DIRECTORY_ENTRY_SIZE).and_then(|offset| directory_rva.checked_add(offset))
         {
             Some(value) => value,
             None =>
@@ -232,9 +228,7 @@ pub fn collect_file_debug_directory<'a>(file: &'a ValidatedPeFile) -> Vec<FileDe
                 break;
             }
         };
-        let entry_file_offset = match index
-            .checked_mul(DEBUG_DIRECTORY_ENTRY_SIZE)
-            .and_then(|offset| directory_file_offset.checked_add(offset))
+        let entry_file_offset = match index.checked_mul(DEBUG_DIRECTORY_ENTRY_SIZE).and_then(|offset| directory_file_offset.checked_add(offset))
         {
             Some(value) => value,
             None =>
@@ -257,57 +251,62 @@ pub fn collect_file_debug_directory<'a>(file: &'a ValidatedPeFile) -> Vec<FileDe
             Some(value) => value,
             None =>
             {
-                eprintln!(
-                    "failed to read debug directory entry {} at file offset 0x{:08X}",
-                    index, entry_file_offset
-                );
+                eprintln!("failed to read debug directory entry {} at file offset 0x{:08X}", index, entry_file_offset);
                 break;
             }
         };
 
-        let Some(characteristics) = read_u32(entry_bytes, 0) else
+        let Some(characteristics) = read_u32(entry_bytes, 0)
+        else
         {
             eprintln!("failed to read debug directory entry {} characteristics", index);
             break;
         };
 
-        let Some(timestamp) = read_u32(entry_bytes, 4) else
+        let Some(timestamp) = read_u32(entry_bytes, 4)
+        else
         {
             eprintln!("failed to read debug directory entry {} timestamp", index);
             break;
         };
 
-        let Some(major_version) = read_u16(entry_bytes, 8) else
+        let Some(major_version) = read_u16(entry_bytes, 8)
+        else
         {
             eprintln!("failed to read debug directory entry {} major version", index);
             break;
         };
 
-        let Some(minor_version) = read_u16(entry_bytes, 10) else
+        let Some(minor_version) = read_u16(entry_bytes, 10)
+        else
         {
             eprintln!("failed to read debug directory entry {} minor version", index);
             break;
         };
 
-        let Some(raw_type) = read_u32(entry_bytes, 12) else
+        let Some(raw_type) = read_u32(entry_bytes, 12)
+        else
         {
             eprintln!("failed to read debug directory entry {} type", index);
             break;
         };
 
-        let Some(size_of_data) = read_u32(entry_bytes, 16).map(|value| value as usize) else
+        let Some(size_of_data) = read_u32(entry_bytes, 16).map(|value| value as usize)
+        else
         {
             eprintln!("failed to read debug directory entry {} data size", index);
             break;
         };
 
-        let Some(address_of_raw_data) = read_u32(entry_bytes, 20) else
+        let Some(address_of_raw_data) = read_u32(entry_bytes, 20)
+        else
         {
             eprintln!("failed to read debug directory entry {} data RVA", index);
             break;
         };
 
-        let Some(pointer_to_raw_data) = read_u32(entry_bytes, 24) else
+        let Some(pointer_to_raw_data) = read_u32(entry_bytes, 24)
+        else
         {
             eprintln!("failed to read debug directory entry {} data pointer", index);
             break;
@@ -315,30 +314,15 @@ pub fn collect_file_debug_directory<'a>(file: &'a ValidatedPeFile) -> Vec<FileDe
 
         let debug_type = FileDebugType::from(raw_type);
 
-        let rva_data_file_offset = (address_of_raw_data != 0)
-            .then(|| rva_to_file_range(file, address_of_raw_data as usize)
-                .map(|(file_offset, _)| file_offset))
-            .flatten();
+        let rva_data_file_offset = (address_of_raw_data != 0).then(|| rva_to_file_range(file, address_of_raw_data as usize).map(|(file_offset, _)| file_offset)).flatten();
 
-        let data_location_mismatch = pointer_to_raw_data != 0
-            && rva_data_file_offset
-                .is_some_and(|offset| offset != pointer_to_raw_data as usize);
+        let data_location_mismatch = pointer_to_raw_data != 0 && rva_data_file_offset.is_some_and(|offset| offset != pointer_to_raw_data as usize);
 
-        let (data_file_offset, raw_data) = collect_debug_data(
-            file,
-            size_of_data,
-            address_of_raw_data,
-            pointer_to_raw_data,
-        );
-        
-        let details = parse_debug_details(
-            debug_type,
-            raw_data,
-            &mut parse_budget,
-        );
+        let (data_file_offset, raw_data) = collect_debug_data(file, size_of_data, address_of_raw_data, pointer_to_raw_data);
 
-        entries.push(FileDebugEntry
-        {
+        let details = parse_debug_details(debug_type, raw_data, &mut parse_budget);
+
+        entries.push(FileDebugEntry {
             index,
             entry_rva,
             entry_file_offset,
@@ -361,7 +345,6 @@ pub fn collect_file_debug_directory<'a>(file: &'a ValidatedPeFile) -> Vec<FileDe
 
     entries
 }
-
 
 impl From<u32> for FileDebugType
 {
@@ -394,7 +377,6 @@ impl From<u32> for FileDebugType
         }
     }
 }
-
 
 impl fmt::Display for FileDebugType
 {
@@ -449,9 +431,7 @@ fn get_debug_directory(file: &ValidatedPeFile) -> Option<(usize, usize)>
         }
     };
 
-    let optional_header_offset = match nt_header_offset
-        .checked_add(PE_SIGNATURE_SIZE)
-        .and_then(|offset| offset.checked_add(COFF_HEADER_SIZE))
+    let optional_header_offset = match nt_header_offset.checked_add(PE_SIGNATURE_SIZE).and_then(|offset| offset.checked_add(COFF_HEADER_SIZE))
     {
         Some(value) => value,
         None =>
@@ -481,9 +461,7 @@ fn get_debug_directory(file: &ValidatedPeFile) -> Option<(usize, usize)>
         }
     };
 
-    let directory_count = match optional_header_offset
-        .checked_add(OPTIONAL_HEADER_DATA_DIRECTORY_COUNT_OFFSET)
-        .and_then(|offset| read_u32(&file.bytes, offset))
+    let directory_count = match optional_header_offset.checked_add(OPTIONAL_HEADER_DATA_DIRECTORY_COUNT_OFFSET).and_then(|offset| read_u32(&file.bytes, offset))
     {
         Some(value) => value as usize,
         None =>
@@ -499,10 +477,7 @@ fn get_debug_directory(file: &ValidatedPeFile) -> Option<(usize, usize)>
         return None;
     }
 
-    let debug_directory_offset = match IMAGE_DIRECTORY_ENTRY_DEBUG
-        .checked_mul(DATA_DIRECTORY_SIZE)
-        .and_then(|offset| OPTIONAL_HEADER_DATA_DIRECTORY_OFFSET.checked_add(offset))
-        .and_then(|offset| optional_header_offset.checked_add(offset))
+    let debug_directory_offset = match IMAGE_DIRECTORY_ENTRY_DEBUG.checked_mul(DATA_DIRECTORY_SIZE).and_then(|offset| OPTIONAL_HEADER_DATA_DIRECTORY_OFFSET.checked_add(offset)).and_then(|offset| optional_header_offset.checked_add(offset))
     {
         Some(value) => value,
         None =>
@@ -548,10 +523,7 @@ fn get_debug_directory(file: &ValidatedPeFile) -> Option<(usize, usize)>
 
     if directory_rva == 0 || directory_size < DEBUG_DIRECTORY_ENTRY_SIZE
     {
-        eprintln!(
-            "debug directory RVA 0x{:08X} with size 0x{:08X} holds no entries",
-            directory_rva, directory_size
-        );
+        eprintln!("debug directory RVA 0x{:08X} with size 0x{:08X} holds no entries", directory_rva, directory_size);
         return None;
     }
 
@@ -572,9 +544,7 @@ fn collect_debug_data(file: &ValidatedPeFile, size: usize, address_of_raw_data: 
         let file_offset = pointer_to_raw_data as usize;
         let data_end = file_offset.checked_add(size);
 
-        if let Some(data) = data_end
-            .filter(|end| *end <= file.bytes.len())
-            .and_then(|end| file.bytes.get(file_offset..end))
+        if let Some(data) = data_end.filter(|end| *end <= file.bytes.len()).and_then(|end| file.bytes.get(file_offset..end))
         {
             return (Some(file_offset), Some(data));
         }
@@ -588,9 +558,7 @@ fn collect_debug_data(file: &ValidatedPeFile, size: usize, address_of_raw_data: 
         {
             let requested_end = file_offset.checked_add(size);
 
-            if let Some(data) = requested_end
-                .filter(|end| *end <= mapped_end)
-                .and_then(|end| file.bytes.get(file_offset..end))
+            if let Some(data) = requested_end.filter(|end| *end <= mapped_end).and_then(|end| file.bytes.get(file_offset..end))
             {
                 return (Some(file_offset), Some(data));
             }
@@ -611,14 +579,7 @@ fn parse_debug_details(debug_type: FileDebugType, data: Option<&[u8]>, parse_bud
     };
     let scanned_bytes = match debug_type
     {
-        FileDebugType::CodeView
-        | FileDebugType::Misc
-        | FileDebugType::VcFeature
-        | FileDebugType::Pogo
-        | FileDebugType::Reproducible
-        | FileDebugType::EmbeddedPortablePdb
-        | FileDebugType::PdbChecksum
-        | FileDebugType::ExtendedDllCharacteristics => data.len(),
+        FileDebugType::CodeView | FileDebugType::Misc | FileDebugType::VcFeature | FileDebugType::Pogo | FileDebugType::Reproducible | FileDebugType::EmbeddedPortablePdb | FileDebugType::PdbChecksum | FileDebugType::ExtendedDllCharacteristics => data.len(),
         _ => 0,
     };
     parse_budget.scanned_bytes = match parse_budget.scanned_bytes.checked_sub(scanned_bytes)
@@ -630,25 +591,14 @@ fn parse_debug_details(debug_type: FileDebugType, data: Option<&[u8]>, parse_bud
     let mut remaining_budget = parse_budget.decoded_bytes;
     let parsed = match debug_type
     {
-        FileDebugType::CodeView => parse_codeview(data, &mut remaining_budget)
-            .map(FileDebugDetails::CodeView),
-        FileDebugType::VcFeature => parse_vc_feature(data)
-            .ok_or(DebugParseError::Malformed)
-            .map(FileDebugDetails::VcFeature),
-        FileDebugType::Pogo => parse_pogo(data, &mut remaining_budget)
-            .map(FileDebugDetails::Pogo),
-        FileDebugType::Reproducible => parse_reproducible(data, &mut remaining_budget)
-            .map(FileDebugDetails::Reproducible),
-        FileDebugType::Misc => parse_misc(data, &mut remaining_budget)
-            .map(FileDebugDetails::Misc),
-        FileDebugType::PdbChecksum => parse_pdb_checksum(data, &mut remaining_budget)
-            .map(FileDebugDetails::PdbChecksum),
-        FileDebugType::EmbeddedPortablePdb => parse_embedded_portable_pdb(data)
-            .ok_or(DebugParseError::Malformed)
-            .map(FileDebugDetails::EmbeddedPortablePdb),
-        FileDebugType::ExtendedDllCharacteristics => read_u32(data, 0)
-            .ok_or(DebugParseError::Malformed)
-            .map(FileDebugDetails::ExtendedDllCharacteristics),
+        FileDebugType::CodeView => parse_codeview(data, &mut remaining_budget).map(FileDebugDetails::CodeView),
+        FileDebugType::VcFeature => parse_vc_feature(data).ok_or(DebugParseError::Malformed).map(FileDebugDetails::VcFeature),
+        FileDebugType::Pogo => parse_pogo(data, &mut remaining_budget).map(FileDebugDetails::Pogo),
+        FileDebugType::Reproducible => parse_reproducible(data, &mut remaining_budget).map(FileDebugDetails::Reproducible),
+        FileDebugType::Misc => parse_misc(data, &mut remaining_budget).map(FileDebugDetails::Misc),
+        FileDebugType::PdbChecksum => parse_pdb_checksum(data, &mut remaining_budget).map(FileDebugDetails::PdbChecksum),
+        FileDebugType::EmbeddedPortablePdb => parse_embedded_portable_pdb(data).ok_or(DebugParseError::Malformed).map(FileDebugDetails::EmbeddedPortablePdb),
+        FileDebugType::ExtendedDllCharacteristics => read_u32(data, 0).ok_or(DebugParseError::Malformed).map(FileDebugDetails::ExtendedDllCharacteristics),
         _ if data.is_empty() => Ok(FileDebugDetails::None),
         _ => Ok(FileDebugDetails::Raw),
     };
@@ -666,14 +616,12 @@ fn parse_debug_details(debug_type: FileDebugType, data: Option<&[u8]>, parse_bud
     }
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DebugParseBudget
 {
     decoded_bytes: usize,
     scanned_bytes: usize,
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DebugParseError
@@ -686,9 +634,7 @@ enum DebugParseError
 /// Charges retained decoded data before its allocation.
 fn charge_decoded_data(decoded_data_budget: &mut usize, retained_bytes: usize) -> Result<(), DebugParseError>
 {
-    *decoded_data_budget = decoded_data_budget
-        .checked_sub(retained_bytes)
-        .ok_or(DebugParseError::DecodeLimitExceeded)?;
+    *decoded_data_budget = decoded_data_budget.checked_sub(retained_bytes).ok_or(DebugParseError::DecodeLimitExceeded)?;
 
     Ok(())
 }
@@ -704,16 +650,11 @@ fn decoded_string_size(byte_length: usize) -> Result<usize, DebugParseError>
 /// Parses RSDS, NB10, or an unknown four-byte CodeView signature.
 fn parse_codeview(data: &[u8], decoded_data_budget: &mut usize) -> Result<FileCodeViewInfo, DebugParseError>
 {
-    let signature: [u8; 4] = data
-        .get(..4)
-        .ok_or(DebugParseError::Malformed)?
-        .try_into()
-        .map_err(|_| DebugParseError::Malformed)?;
+    let signature: [u8; 4] = data.get(..4).ok_or(DebugParseError::Malformed)?.try_into().map_err(|_| DebugParseError::Malformed)?;
 
     if signature == *b"RSDS"
     {
-        return Ok(FileCodeViewInfo::Rsds
-        {
+        return Ok(FileCodeViewInfo::Rsds {
             guid: read_guid(data, 4).ok_or(DebugParseError::Malformed)?,
             age: read_u32(data, RSDS_AGE_OFFSET).ok_or(DebugParseError::Malformed)?,
             path: read_c_string(data, RSDS_PATH_OFFSET, decoded_data_budget)?,
@@ -722,8 +663,7 @@ fn parse_codeview(data: &[u8], decoded_data_budget: &mut usize) -> Result<FileCo
 
     if signature == *b"NB10"
     {
-        return Ok(FileCodeViewInfo::Nb10
-        {
+        return Ok(FileCodeViewInfo::Nb10 {
             offset: read_u32(data, NB10_OFFSET_OFFSET).ok_or(DebugParseError::Malformed)?,
             signature: read_u32(data, NB10_SIGNATURE_OFFSET).ok_or(DebugParseError::Malformed)?,
             age: read_u32(data, NB10_AGE_OFFSET).ok_or(DebugParseError::Malformed)?,
@@ -738,8 +678,7 @@ fn parse_codeview(data: &[u8], decoded_data_budget: &mut usize) -> Result<FileCo
 /// Parses the five little-endian counters in a VC feature payload.
 fn parse_vc_feature(data: &[u8]) -> Option<FileVcFeatureInfo>
 {
-    Some(FileVcFeatureInfo
-    {
+    Some(FileVcFeatureInfo {
         pre_vc11: read_u32(data, 0)?,
         c_cpp: read_u32(data, 4)?,
         gs: read_u32(data, 8)?,
@@ -752,11 +691,7 @@ fn parse_vc_feature(data: &[u8]) -> Option<FileVcFeatureInfo>
 /// Parses aligned POGO procedure-group records after their four-byte signature.
 fn parse_pogo(data: &[u8], decoded_data_budget: &mut usize) -> Result<FilePogoInfo, DebugParseError>
 {
-    let signature = data
-        .get(..4)
-        .ok_or(DebugParseError::Malformed)?
-        .try_into()
-        .map_err(|_| DebugParseError::Malformed)?;
+    let signature = data.get(..4).ok_or(DebugParseError::Malformed)?.try_into().map_err(|_| DebugParseError::Malformed)?;
 
     let mut entries = Vec::new();
     let mut offset = 4usize;
@@ -774,45 +709,30 @@ fn parse_pogo(data: &[u8], decoded_data_budget: &mut usize) -> Result<FilePogoIn
         let name_offset = offset.checked_add(8).ok_or(DebugParseError::Malformed)?;
         let name_bytes = data.get(name_offset..).ok_or(DebugParseError::Malformed)?;
 
-        let name_length = name_bytes
-            .iter()
-            .position(|byte| *byte == 0)
-            .ok_or(DebugParseError::Malformed)?;
+        let name_length = name_bytes.iter().position(|byte| *byte == 0).ok_or(DebugParseError::Malformed)?;
 
         if name_length == 0
         {
             return Err(DebugParseError::Malformed);
         }
 
-        let next_offset = name_offset
-            .checked_add(name_length)
-            .and_then(|value| value.checked_add(1))
-            .ok_or(DebugParseError::Malformed)?;
+        let next_offset = name_offset.checked_add(name_length).and_then(|value| value.checked_add(1)).ok_or(DebugParseError::Malformed)?;
 
-        let aligned_offset = next_offset
-            .checked_add(3)
-            .ok_or(DebugParseError::Malformed)? & !3;
+        let aligned_offset = next_offset.checked_add(3).ok_or(DebugParseError::Malformed)? & !3;
 
         if aligned_offset > data.len()
         {
             return Err(DebugParseError::Malformed);
         }
 
-        let retained_bytes = decoded_string_size(name_length)?
-            .checked_add(std::mem::size_of::<FilePogoEntry>())
-            .ok_or(DebugParseError::DecodeLimitExceeded)?;
+        let retained_bytes = decoded_string_size(name_length)?.checked_add(std::mem::size_of::<FilePogoEntry>()).ok_or(DebugParseError::DecodeLimitExceeded)?;
 
         charge_decoded_data(decoded_data_budget, retained_bytes)?;
-        entries
-            .try_reserve(1)
-            .map_err(|_| DebugParseError::DecodeLimitExceeded)?;
+        entries.try_reserve(1).map_err(|_| DebugParseError::DecodeLimitExceeded)?;
 
-        let name = String::from_utf8_lossy(&name_bytes[..name_length])
-            .into_owned()
-            .into_boxed_str();
+        let name = String::from_utf8_lossy(&name_bytes[..name_length]).into_owned().into_boxed_str();
 
-        entries.push(FilePogoEntry
-        {
+        entries.push(FilePogoEntry {
             rva,
             size,
             name,
@@ -820,8 +740,7 @@ fn parse_pogo(data: &[u8], decoded_data_budget: &mut usize) -> Result<FilePogoIn
         offset = aligned_offset;
     }
 
-    Ok(FilePogoInfo
-    {
+    Ok(FilePogoInfo {
         signature,
         entries,
     })
@@ -833,8 +752,7 @@ fn parse_reproducible(data: &[u8], decoded_data_budget: &mut usize) -> Result<Fi
 {
     if data.is_empty()
     {
-        return Ok(FileReproducibleInfo
-        {
+        return Ok(FileReproducibleInfo {
             declared_hash_length: None,
             hash: Box::default(),
             length_matches: true,
@@ -847,8 +765,7 @@ fn parse_reproducible(data: &[u8], decoded_data_budget: &mut usize) -> Result<Fi
 
     charge_decoded_data(decoded_data_budget, retained_length)?;
 
-    Ok(FileReproducibleInfo
-    {
+    Ok(FileReproducibleInfo {
         declared_hash_length: Some(declared_hash_length),
         hash: hash_bytes[..retained_length].into(),
         length_matches: declared_hash_length == hash_bytes.len(),
@@ -860,8 +777,7 @@ fn parse_reproducible(data: &[u8], decoded_data_budget: &mut usize) -> Result<Fi
 fn parse_misc(data: &[u8], decoded_data_budget: &mut usize) -> Result<FileMiscDebugInfo, DebugParseError>
 {
     let data_type = read_u32(data, 0).ok_or(DebugParseError::Malformed)?;
-    let declared_length = read_u32(data, 4)
-        .ok_or(DebugParseError::Malformed)? as usize;
+    let declared_length = read_u32(data, 4).ok_or(DebugParseError::Malformed)? as usize;
     let unicode = *data.get(8).ok_or(DebugParseError::Malformed)? != 0;
 
     if declared_length < 12 || declared_length > data.len()
@@ -869,9 +785,7 @@ fn parse_misc(data: &[u8], decoded_data_budget: &mut usize) -> Result<FileMiscDe
         return Err(DebugParseError::Malformed);
     }
 
-    let value_bytes = data
-        .get(12..declared_length)
-        .ok_or(DebugParseError::Malformed)?;
+    let value_bytes = data.get(12..declared_length).ok_or(DebugParseError::Malformed)?;
     let text = if unicode
     {
         if value_bytes.len() % 2 != 0
@@ -879,10 +793,7 @@ fn parse_misc(data: &[u8], decoded_data_budget: &mut usize) -> Result<FileMiscDe
             return Err(DebugParseError::Malformed);
         }
 
-        let word_count = value_bytes
-            .chunks_exact(2)
-            .position(|pair| pair == [0, 0])
-            .unwrap_or(value_bytes.len() / 2);
+        let word_count = value_bytes.chunks_exact(2).position(|pair| pair == [0, 0]).unwrap_or(value_bytes.len() / 2);
 
         if word_count == 0
         {
@@ -890,29 +801,16 @@ fn parse_misc(data: &[u8], decoded_data_budget: &mut usize) -> Result<FileMiscDe
         }
         else
         {
-            charge_decoded_data(
-                decoded_data_budget,
-                decoded_string_size(word_count)?,
-            )?;
+            charge_decoded_data(decoded_data_budget, decoded_string_size(word_count)?)?;
 
-            let string = std::char::decode_utf16(
-                value_bytes[..word_count * 2]
-                    .chunks_exact(2)
-                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]])),
-            )
-            .map(|character| character.unwrap_or(char::REPLACEMENT_CHARACTER))
-            .collect::<String>()
-            .into_boxed_str();
+            let string = std::char::decode_utf16(value_bytes[..word_count * 2].chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]]))).map(|character| character.unwrap_or(char::REPLACEMENT_CHARACTER)).collect::<String>().into_boxed_str();
 
             Some(string)
         }
     }
     else
     {
-        let length = value_bytes
-            .iter()
-            .position(|byte| *byte == 0)
-            .unwrap_or(value_bytes.len());
+        let length = value_bytes.iter().position(|byte| *byte == 0).unwrap_or(value_bytes.len());
 
         if length == 0
         {
@@ -920,19 +818,13 @@ fn parse_misc(data: &[u8], decoded_data_budget: &mut usize) -> Result<FileMiscDe
         }
         else
         {
-            charge_decoded_data(
-                decoded_data_budget,
-                decoded_string_size(length)?,
-            )?;
+            charge_decoded_data(decoded_data_budget, decoded_string_size(length)?)?;
 
-            Some(String::from_utf8_lossy(&value_bytes[..length])
-                .into_owned()
-                .into_boxed_str())
+            Some(String::from_utf8_lossy(&value_bytes[..length]).into_owned().into_boxed_str())
         }
     };
 
-    Ok(FileMiscDebugInfo
-    {
+    Ok(FileMiscDebugInfo {
         data_type,
         declared_length,
         unicode,
@@ -942,26 +834,17 @@ fn parse_misc(data: &[u8], decoded_data_budget: &mut usize) -> Result<FileMiscDe
 
 
 /// Parses a NUL-terminated UTF-8 algorithm name followed by checksum bytes.
-fn parse_pdb_checksum(
-    data: &[u8],
-    decoded_data_budget: &mut usize,
-) -> Result<FilePdbChecksumInfo, DebugParseError>
+fn parse_pdb_checksum(data: &[u8], decoded_data_budget: &mut usize) -> Result<FilePdbChecksumInfo, DebugParseError>
 {
-    let algorithm_length = data
-        .iter()
-        .position(|byte| *byte == 0)
-        .ok_or(DebugParseError::Malformed)?;
+    let algorithm_length = data.iter().position(|byte| *byte == 0).ok_or(DebugParseError::Malformed)?;
 
     if algorithm_length == 0
     {
         return Err(DebugParseError::Malformed);
     }
 
-    let algorithm = std::str::from_utf8(&data[..algorithm_length])
-        .map_err(|_| DebugParseError::Malformed)?;
-    let checksum_offset = algorithm_length
-        .checked_add(1)
-        .ok_or(DebugParseError::Malformed)?;
+    let algorithm = std::str::from_utf8(&data[..algorithm_length]).map_err(|_| DebugParseError::Malformed)?;
+    let checksum_offset = algorithm_length.checked_add(1).ok_or(DebugParseError::Malformed)?;
     let checksum = data.get(checksum_offset..).ok_or(DebugParseError::Malformed)?;
 
     if checksum.is_empty()
@@ -969,14 +852,11 @@ fn parse_pdb_checksum(
         return Err(DebugParseError::Malformed);
     }
 
-    let retained_bytes = algorithm_length
-        .checked_add(checksum.len())
-        .ok_or(DebugParseError::DecodeLimitExceeded)?;
+    let retained_bytes = algorithm_length.checked_add(checksum.len()).ok_or(DebugParseError::DecodeLimitExceeded)?;
 
     charge_decoded_data(decoded_data_budget, retained_bytes)?;
 
-    Ok(FilePdbChecksumInfo
-    {
+    Ok(FilePdbChecksumInfo {
         algorithm: algorithm.into(),
         checksum: checksum.into(),
     })
@@ -993,8 +873,7 @@ fn parse_embedded_portable_pdb(data: &[u8]) -> Option<FileEmbeddedPortablePdbInf
         return None;
     }
 
-    Some(FileEmbeddedPortablePdbInfo
-    {
+    Some(FileEmbeddedPortablePdbInfo {
         uncompressed_size: read_u32(data, 4)? as usize,
         compressed_size: data.len().checked_sub(8)?,
     })
@@ -1007,8 +886,7 @@ fn read_guid(data: &[u8], offset: usize) -> Option<PdbGuid>
     let data4_offset = offset.checked_add(8)?;
     let data4_end = data4_offset.checked_add(8)?;
 
-    Some(PdbGuid
-    {
+    Some(PdbGuid {
         data1: read_u32(data, offset)?,
         data2: read_u16(data, offset.checked_add(4)?)?,
         data3: read_u16(data, offset.checked_add(6)?)?,
@@ -1021,19 +899,9 @@ fn read_guid(data: &[u8], offset: usize) -> Option<PdbGuid>
 fn read_c_string(data: &[u8], offset: usize, decoded_data_budget: &mut usize) -> Result<Box<str>, DebugParseError>
 {
     let bytes = data.get(offset..).ok_or(DebugParseError::Malformed)?;
-    let length = bytes
-        .iter()
-        .position(|byte| *byte == 0)
-        .filter(|length| *length != 0)
-        .ok_or(DebugParseError::Malformed)?;
+    let length = bytes.iter().position(|byte| *byte == 0).filter(|length| *length != 0).ok_or(DebugParseError::Malformed)?;
 
-    charge_decoded_data(
-        decoded_data_budget,
-        decoded_string_size(length)?,
-    )?;
+    charge_decoded_data(decoded_data_budget, decoded_string_size(length)?)?;
 
-    Ok(String::from_utf8_lossy(&bytes[..length])
-        .into_owned()
-        .into_boxed_str())
+    Ok(String::from_utf8_lossy(&bytes[..length]).into_owned().into_boxed_str())
 }
-

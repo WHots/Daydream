@@ -2,13 +2,10 @@ use core::mem::size_of;
 use std::ffi::CStr;
 use std::path::Path;
 
-use windows_sys::Win32::System::Diagnostics::Debug::{
-    IMAGE_DEBUG_DIRECTORY, IMAGE_DEBUG_TYPE_CODEVIEW, IMAGE_DIRECTORY_ENTRY_DEBUG,
-};
+use windows_sys::Win32::System::Diagnostics::Debug::{IMAGE_DEBUG_DIRECTORY, IMAGE_DEBUG_TYPE_CODEVIEW, IMAGE_DIRECTORY_ENTRY_DEBUG};
 
 use crate::core::process_ops::utils::foundation::validate_pe::{self, ValidatedPeSnapshot};
 use crate::core::process_ops::utils::pe_utils;
-use crate::core::process_ops::utils::processutils::ProcessPeValidationError;
 
 /// Byte length of a CodeView record signature.
 const CODEVIEW_SIGNATURE_SIZE: usize = 4;
@@ -85,12 +82,9 @@ pub struct PdbInfo
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PdbInfoCollectionError
 {
-    ProcessValidationFailed(ProcessPeValidationError),
-    InvalidMainModulePe(validate_pe::PeValidationError),
     IncompleteMainModuleSnapshot
     {
-        rva: usize,
-        size: usize,
+        rva: usize, size: usize
     },
 }
 
@@ -101,8 +95,7 @@ pub enum PdbInfoCollectionError
 /// Returns supported CodeView metadata, absence, or the original unavailable-range error.
 pub(crate) fn collect_main_module_pdb_info_from_snapshot(snapshot: &ValidatedPeSnapshot) -> Result<Option<PdbInfo>, PdbInfoCollectionError>
 {
-    collect_pdb_info_from_pe(&snapshot.bytes, &snapshot.pe, Some(snapshot)).map_err(|range| PdbInfoCollectionError::IncompleteMainModuleSnapshot
-    {
+    collect_pdb_info_from_pe(&snapshot.bytes, &snapshot.pe, Some(snapshot)).map_err(|range| PdbInfoCollectionError::IncompleteMainModuleSnapshot {
         rva: range.rva,
         size: range.size,
     })
@@ -134,8 +127,7 @@ fn collect_pdb_info_from_pe(module_bytes: &[u8], pe: &validate_pe::PeImage, snap
     if snapshot.is_some_and(|value| !validate_pe::is_snapshot_range_available(value, debug_directory_rva, debug_directory_size))
     {
         eprintln!("process PDB debug-directory bytes are unavailable");
-        return Err(validate_pe::UnavailablePeRange
-        {
+        return Err(validate_pe::UnavailablePeRange {
             rva: debug_directory_rva,
             size: debug_directory_size,
         });
@@ -180,8 +172,7 @@ fn collect_pdb_info_from_pe(module_bytes: &[u8], pe: &validate_pe::PeImage, snap
         if snapshot.is_some_and(|value| !validate_pe::is_snapshot_range_available(value, codeview_rva, codeview_size))
         {
             eprintln!("process PDB CodeView bytes are unavailable");
-            return Err(validate_pe::UnavailablePeRange
-            {
+            return Err(validate_pe::UnavailablePeRange {
                 rva: codeview_rva,
                 size: codeview_size,
             });
@@ -207,11 +198,7 @@ fn collect_pdb_info_from_pe(module_bytes: &[u8], pe: &validate_pe::PeImage, snap
 
         let pdb_record = if codeview_signature == b"RSDS"
         {
-            match (
-                read_guid(codeview_data, RSDS_GUID_OFFSET),
-                read_u32_le(codeview_data, RSDS_AGE_OFFSET),
-                read_pdb_path(codeview_data, RSDS_PATH_OFFSET),
-            )
+            match (read_guid(codeview_data, RSDS_GUID_OFFSET), read_u32_le(codeview_data, RSDS_AGE_OFFSET), read_pdb_path(codeview_data, RSDS_PATH_OFFSET))
             {
                 (Some(guid), Some(age), Some(pdb_path)) => Some((PdbCodeViewFormat::Rsds, Some(guid), None, age, pdb_path)),
                 _ => None,
@@ -219,11 +206,7 @@ fn collect_pdb_info_from_pe(module_bytes: &[u8], pe: &validate_pe::PeImage, snap
         }
         else if codeview_signature == b"NB10"
         {
-            match (
-                read_u32_le(codeview_data, NB10_SIGNATURE_OFFSET),
-                read_u32_le(codeview_data, NB10_AGE_OFFSET),
-                read_pdb_path(codeview_data, NB10_PATH_OFFSET),
-            )
+            match (read_u32_le(codeview_data, NB10_SIGNATURE_OFFSET), read_u32_le(codeview_data, NB10_AGE_OFFSET), read_pdb_path(codeview_data, NB10_PATH_OFFSET))
             {
                 (Some(signature), Some(age), Some(pdb_path)) => Some((PdbCodeViewFormat::Nb10, None, Some(signature), age, pdb_path)),
                 _ => None,
@@ -240,8 +223,7 @@ fn collect_pdb_info_from_pe(module_bytes: &[u8], pe: &validate_pe::PeImage, snap
             None => continue,
         };
 
-        return Ok(Some(PdbInfo
-        {
+        return Ok(Some(PdbInfo {
             format,
             path: build_path_info(pdb_path),
             guid,
@@ -250,8 +232,7 @@ fn collect_pdb_info_from_pe(module_bytes: &[u8], pe: &validate_pe::PeImage, snap
             debug_directory_rva: entry_rva,
             debug_directory_file_offset: pe_utils::get_file_offset_from_pe(pe, entry_rva),
             codeview_rva,
-            codeview_file_offset: pe_utils::get_file_offset_from_pe(pe, codeview_rva).or_else(||
-            {
+            codeview_file_offset: pe_utils::get_file_offset_from_pe(pe, codeview_rva).or_else(|| {
                 if entry.PointerToRawData == 0
                 {
                     None
@@ -294,8 +275,7 @@ fn read_guid(bytes: &[u8], offset: usize) -> Option<PdbGuid>
     let data4_start = offset.checked_add(8)?;
     let data4_end = data4_start.checked_add(8)?;
 
-    Some(PdbGuid
-    {
+    Some(PdbGuid {
         data1: read_u32_le(bytes, offset)?,
         data2: u16::from_le_bytes(bytes.get(offset.checked_add(4)?..offset.checked_add(6)?)?.try_into().ok()?),
         data3: u16::from_le_bytes(bytes.get(offset.checked_add(6)?..offset.checked_add(8)?)?.try_into().ok()?),
@@ -341,27 +321,14 @@ fn read_pdb_path(bytes: &[u8], offset: usize) -> Option<Box<str>>
 fn build_path_info(full_path: Box<str>) -> PdbPathInfo
 {
     let path = Path::new(full_path.as_ref());
-    
-    let directory = path
-        .parent()
-        .map(|value| value.to_string_lossy().into_owned().into_boxed_str())
-        .filter(|value| !value.is_empty());
-    let file_name = path
-        .file_name()
-        .map(|value| value.to_string_lossy().into_owned().into_boxed_str())
-        .filter(|value| !value.is_empty());
-    let file_stem = path
-        .file_stem()
-        .map(|value| value.to_string_lossy().into_owned().into_boxed_str())
-        .filter(|value| !value.is_empty());
-    let extension = path
-        .extension()
-        .map(|value| value.to_string_lossy().into_owned().into_boxed_str())
-        .filter(|value| !value.is_empty());
+
+    let directory = path.parent().map(|value| value.to_string_lossy().into_owned().into_boxed_str()).filter(|value| !value.is_empty());
+    let file_name = path.file_name().map(|value| value.to_string_lossy().into_owned().into_boxed_str()).filter(|value| !value.is_empty());
+    let file_stem = path.file_stem().map(|value| value.to_string_lossy().into_owned().into_boxed_str()).filter(|value| !value.is_empty());
+    let extension = path.extension().map(|value| value.to_string_lossy().into_owned().into_boxed_str()).filter(|value| !value.is_empty());
     let exists_on_disk = path.is_file();
 
-    PdbPathInfo
-    {
+    PdbPathInfo {
         full_path,
         directory,
         file_name,

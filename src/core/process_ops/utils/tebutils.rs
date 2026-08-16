@@ -1,8 +1,8 @@
 use core::ffi::c_void;
 use core::mem::{size_of, MaybeUninit};
 
-use windows_sys::Win32::Foundation::{GetLastError, HANDLE, INVALID_HANDLE_VALUE, NTSTATUS, ERROR_NO_MORE_FILES};
-use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Thread32First, Thread32Next, THREADENTRY32, TH32CS_SNAPTHREAD};
+use windows_sys::Win32::Foundation::{GetLastError, ERROR_NO_MORE_FILES, HANDLE, INVALID_HANDLE_VALUE, NTSTATUS};
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32};
 use windows_sys::Win32::System::Threading::{GetProcessId, OpenThread, THREAD_QUERY_INFORMATION};
 
 use crate::core::internal::imports::imports::nt_query_information_thread;
@@ -88,12 +88,6 @@ pub enum ProcessTebCollectionError
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ThreadTebCollectionError
 {
-    InvalidProcessHandle,
-    ProcessIdUnavailable
-    {
-        error: u32,
-    },
-    InvalidThreadId,
     ThreadOpenFailed
     {
         error: u32,
@@ -188,16 +182,14 @@ pub fn collect_process_tebs(process: HANDLE, progress: &mut impl FnMut(usize, us
     {
         let error = unsafe { GetLastError() };
 
-        return Err(ProcessTebCollectionError::ProcessIdUnavailable
-        {
+        return Err(ProcessTebCollectionError::ProcessIdUnavailable {
             error,
         });
     }
 
     let thread_ids = enumerate_process_thread_ids(process_id)?;
     let thread_count = thread_ids.len();
-    let mut collection = ProcessTebCollection
-    {
+    let mut collection = ProcessTebCollection {
         process_id,
         tebs: Vec::with_capacity(thread_ids.len()),
         failures: Vec::new(),
@@ -212,7 +204,10 @@ pub fn collect_process_tebs(process: HANDLE, progress: &mut impl FnMut(usize, us
             Ok(teb) => collection.tebs.push(teb),
             Err(error) =>
             {
-                collection.failures.push(ThreadTebFailure { thread_id, error });
+                collection.failures.push(ThreadTebFailure {
+                    thread_id,
+                    error,
+                });
             }
         }
 
@@ -235,8 +230,7 @@ fn enumerate_process_thread_ids(process_id: u32) -> Result<Vec<u32>, ProcessTebC
     {
         let error = unsafe { GetLastError() };
 
-        return Err(ProcessTebCollectionError::ThreadSnapshotFailed
-        {
+        return Err(ProcessTebCollectionError::ThreadSnapshotFailed {
             error,
         });
     }
@@ -248,8 +242,7 @@ fn enumerate_process_thread_ids(process_id: u32) -> Result<Vec<u32>, ProcessTebC
         {
             let error = unsafe { GetLastError() };
 
-            return Err(ProcessTebCollectionError::ThreadSnapshotFailed
-            {
+            return Err(ProcessTebCollectionError::ThreadSnapshotFailed {
                 error,
             });
         }
@@ -269,8 +262,7 @@ fn enumerate_process_thread_ids(process_id: u32) -> Result<Vec<u32>, ProcessTebC
             return Ok(thread_ids);
         }
 
-        return Err(ProcessTebCollectionError::ThreadSnapshotIterationFailed
-        {
+        return Err(ProcessTebCollectionError::ThreadSnapshotIterationFailed {
             error,
         });
     }
@@ -298,8 +290,7 @@ fn enumerate_process_thread_ids(process_id: u32) -> Result<Vec<u32>, ProcessTebC
             break;
         }
 
-        return Err(ProcessTebCollectionError::ThreadSnapshotIterationFailed
-        {
+        return Err(ProcessTebCollectionError::ThreadSnapshotIterationFailed {
             error,
         });
     }
@@ -326,8 +317,7 @@ fn collect_thread_teb_for_process(process: HANDLE, process_id: u32, thread_id: u
         {
             let error = unsafe { GetLastError() };
 
-            return Err(ThreadTebCollectionError::ThreadOpenFailed
-            {
+            return Err(ThreadTebCollectionError::ThreadOpenFailed {
                 error,
             });
         }
@@ -336,8 +326,7 @@ fn collect_thread_teb_for_process(process: HANDLE, process_id: u32, thread_id: u
 
     if basic_information.client_id.unique_process != process_id as usize || basic_information.client_id.unique_thread != thread_id as usize
     {
-        return Err(ThreadTebCollectionError::ThreadIdentityMismatch
-        {
+        return Err(ThreadTebCollectionError::ThreadIdentityMismatch {
             expected_process_id: process_id,
             actual_process_id: basic_information.client_id.unique_process,
             expected_thread_id: thread_id,
@@ -354,8 +343,7 @@ fn collect_thread_teb_for_process(process: HANDLE, process_id: u32, thread_id: u
 
     let header = read_teb_header(process, teb_address)?;
 
-    Ok(ThreadTebInfo
-    {
+    Ok(ThreadTebInfo {
         thread_id,
         teb_address,
         exit_status: basic_information.exit_status,
@@ -397,8 +385,7 @@ fn query_thread_basic_information(thread: HANDLE) -> Result<ThreadBasicInformati
 
     if status < 0
     {
-        return Err(ThreadTebCollectionError::ThreadInformationQueryFailed
-        {
+        return Err(ThreadTebCollectionError::ThreadInformationQueryFailed {
             status,
             return_length,
         });
@@ -406,8 +393,7 @@ fn query_thread_basic_information(thread: HANDLE) -> Result<ThreadBasicInformati
 
     if return_length != 0 && return_length < information_length
     {
-        return Err(ThreadTebCollectionError::ThreadInformationTooSmall
-        {
+        return Err(ThreadTebCollectionError::ThreadInformationTooSmall {
             return_length,
         });
     }
@@ -427,8 +413,7 @@ fn read_teb_header(process: HANDLE, teb_address: usize) -> Result<TebHeader64, T
 
     if read.bytes.len() < TEB_HEADER64_SIZE
     {
-        return Err(ThreadTebCollectionError::TebReadIncomplete
-        {
+        return Err(ThreadTebCollectionError::TebReadIncomplete {
             bytes_requested: TEB_HEADER64_SIZE,
             bytes_read: read.bytes.len(),
         });

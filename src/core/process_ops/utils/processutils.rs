@@ -4,20 +4,13 @@ use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 
-use windows_sys::Win32::Foundation::{
-    CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE, NTSTATUS, ERROR_BAD_LENGTH,
-};
-use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Module32FirstW, MODULEENTRY32W, TH32CS_SNAPMODULE,
-    TH32CS_SNAPMODULE32,
-};
+use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_BAD_LENGTH, HANDLE, INVALID_HANDLE_VALUE, NTSTATUS};
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Module32FirstW, MODULEENTRY32W, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32};
 use windows_sys::Win32::System::Memory::{MEM_COMMIT, PAGE_GUARD, PAGE_NOACCESS};
 use windows_sys::Win32::System::Threading::GetProcessId;
 
 use crate::core::internal::imports::imports::nt_query_information_process;
-use crate::core::process_ops::utils::foundation::validate_pe::{
-    self, PeValidationError, ValidatedPeImage,
-};
+use crate::core::process_ops::utils::foundation::validate_pe::{self, PeValidationError, ValidatedPeImage};
 use crate::core::process_ops::utils::memutils::{self, MemoryRegionQueryError, MemoryRegionType, ProcessMemoryReadError};
 
 /// Native `PROCESSINFOCLASS` value selecting `ProcessBasicInformation`.
@@ -28,7 +21,6 @@ const TOOLHELP_SNAPSHOT_RETRY_LIMIT: usize = 4;
 
 /// Mask containing the base page-protection value without protection modifiers.
 const PAGE_BASE_PROTECTION_MASK: u32 = 0xFF;
-
 
 /// Describes the process identity, PEB, and validated main image proven by one strict pass.
 #[derive(Debug, Eq, PartialEq)]
@@ -173,15 +165,16 @@ pub fn validate_process_peb(process: HANDLE) -> Result<ValidatedProcessPe, Proce
         // SAFETY: `GetLastError` only reads the calling thread's last-error value.
         let error = unsafe { GetLastError() };
 
-        return Err(ProcessPeValidationError::ProcessIdUnavailable { error });
+        return Err(ProcessPeValidationError::ProcessIdUnavailable {
+            error,
+        });
     }
 
     let process_information = query_process_basic_information(process)?;
 
     if process_information.unique_process_id != process_id as usize
     {
-        return Err(ProcessPeValidationError::ProcessIdentityMismatch
-        {
+        return Err(ProcessPeValidationError::ProcessIdentityMismatch {
             handle_process_id: process_id,
             basic_information_process_id: process_information.unique_process_id,
         });
@@ -196,33 +189,28 @@ pub fn validate_process_peb(process: HANDLE) -> Result<ValidatedProcessPe, Proce
 
     if peb_address % align_of::<usize>() != 0
     {
-        return Err(ProcessPeValidationError::PebAddressMisaligned { peb_address });
+        return Err(ProcessPeValidationError::PebAddressMisaligned {
+            peb_address,
+        });
     }
 
     let peb_bytes_required = size_of::<PebImageBaseBlock>();
-    let peb_end = peb_address.checked_add(peb_bytes_required).ok_or(ProcessPeValidationError::PebRangeOverflow
-    {
+    let peb_end = peb_address.checked_add(peb_bytes_required).ok_or(ProcessPeValidationError::PebRangeOverflow {
         peb_address,
         bytes_required: peb_bytes_required,
     })?;
-    let peb_region = memutils::query_region(process, peb_address).map_err(|error|
-    {
-        ProcessPeValidationError::PebRegionQueryFailed
-        {
-            peb_address,
-            error,
-        }
+    let peb_region = memutils::query_region(process, peb_address).map_err(|error| ProcessPeValidationError::PebRegionQueryFailed {
+        peb_address,
+        error,
     })?;
-    let peb_region_end = peb_region.base_address.checked_add(peb_region.region_size).ok_or(ProcessPeValidationError::PebRangeOverflow
-    {
+    let peb_region_end = peb_region.base_address.checked_add(peb_region.region_size).ok_or(ProcessPeValidationError::PebRangeOverflow {
         peb_address: peb_region.base_address,
         bytes_required: peb_region.region_size,
     })?;
 
     if peb_region.base_address > peb_address || peb_end > peb_region_end || peb_region.state != MEM_COMMIT || peb_region.region_type != MemoryRegionType::Private || peb_region.protect & PAGE_GUARD != 0 || peb_region.protect & PAGE_BASE_PROTECTION_MASK == PAGE_NOACCESS
     {
-        return Err(ProcessPeValidationError::InvalidPebRegion
-        {
+        return Err(ProcessPeValidationError::InvalidPebRegion {
             peb_address,
             region_base_address: peb_region.base_address,
             region_size: peb_region.region_size,
@@ -239,8 +227,7 @@ pub fn validate_process_peb(process: HANDLE) -> Result<ValidatedProcessPe, Proce
 
     if toolhelp_image.base_address != image.base_address
     {
-        return Err(ProcessPeValidationError::MainImageBaseMismatch
-        {
+        return Err(ProcessPeValidationError::MainImageBaseMismatch {
             peb_image_base: image.base_address,
             toolhelp_image_base: toolhelp_image.base_address,
         });
@@ -248,15 +235,13 @@ pub fn validate_process_peb(process: HANDLE) -> Result<ValidatedProcessPe, Proce
 
     if toolhelp_image.image_size != image.image_size
     {
-        return Err(ProcessPeValidationError::MainImageSizeMismatch
-        {
+        return Err(ProcessPeValidationError::MainImageSizeMismatch {
             validated_image_size: image.image_size,
             toolhelp_image_size: toolhelp_image.image_size,
         });
     }
 
-    Ok(ValidatedProcessPe
-    {
+    Ok(ValidatedProcessPe {
         process_id,
         peb_address,
         being_debugged: peb.being_debugged != 0,
@@ -277,16 +262,12 @@ fn query_process_basic_information(process: HANDLE) -> Result<ProcessBasicInform
     let information_length = size_of::<ProcessBasicInformation>() as u32;
 
     // SAFETY: the output buffer has the exact requested size and lives through the native call.
-    let status = unsafe
-    {
-        nt_query_information_process(process, PROCESS_BASIC_INFORMATION_CLASS, information.as_mut_ptr() as *mut c_void, information_length, &mut return_length)
-    };
+    let status = unsafe { nt_query_information_process(process, PROCESS_BASIC_INFORMATION_CLASS, information.as_mut_ptr() as *mut c_void, information_length, &mut return_length) };
 
     if status < 0
     {
         eprintln!("failed to query native process basic information");
-        return Err(ProcessPeValidationError::ProcessBasicInformationQueryFailed
-        {
+        return Err(ProcessPeValidationError::ProcessBasicInformationQueryFailed {
             status,
             return_length,
         });
@@ -295,7 +276,9 @@ fn query_process_basic_information(process: HANDLE) -> Result<ProcessBasicInform
     if return_length < information_length
     {
         eprintln!("native process basic information was shorter than expected");
-        return Err(ProcessPeValidationError::ProcessBasicInformationTooSmall { return_length });
+        return Err(ProcessPeValidationError::ProcessBasicInformationTooSmall {
+            return_length,
+        });
     }
 
     // SAFETY: a successful query reporting the full structure size initialized the output buffer.
@@ -328,8 +311,7 @@ fn query_toolhelp_main_image(process_id: u32) -> Result<ToolhelpMainImage, Proce
         if snapshot_error != ERROR_BAD_LENGTH
         {
             eprintln!("failed to create the target process module snapshot");
-            return Err(ProcessPeValidationError::ModuleSnapshotFailed
-            {
+            return Err(ProcessPeValidationError::ModuleSnapshotFailed {
                 error: snapshot_error,
             });
         }
@@ -338,8 +320,7 @@ fn query_toolhelp_main_image(process_id: u32) -> Result<ToolhelpMainImage, Proce
     if snapshot == INVALID_HANDLE_VALUE
     {
         eprintln!("target process module snapshot retries were exhausted");
-        return Err(ProcessPeValidationError::ModuleSnapshotFailed
-        {
+        return Err(ProcessPeValidationError::ModuleSnapshotFailed {
             error: snapshot_error,
         });
     }
@@ -366,8 +347,7 @@ fn query_toolhelp_main_image(process_id: u32) -> Result<ToolhelpMainImage, Proce
     if found == 0
     {
         eprintln!("target process module snapshot did not contain a main module");
-        return Err(ProcessPeValidationError::MainModuleEntryUnavailable
-        {
+        return Err(ProcessPeValidationError::MainModuleEntryUnavailable {
             error: entry_error,
         });
     }
@@ -375,8 +355,7 @@ fn query_toolhelp_main_image(process_id: u32) -> Result<ToolhelpMainImage, Proce
     if entry.th32ProcessID != process_id
     {
         eprintln!("Toolhelp main-module entry belongs to a different process");
-        return Err(ProcessPeValidationError::ToolhelpProcessIdentityMismatch
-        {
+        return Err(ProcessPeValidationError::ToolhelpProcessIdentityMismatch {
             expected_process_id: process_id,
             actual_process_id: entry.th32ProcessID,
         });
@@ -390,8 +369,7 @@ fn query_toolhelp_main_image(process_id: u32) -> Result<ToolhelpMainImage, Proce
         return Err(ProcessPeValidationError::MainImagePathUnavailable);
     }
 
-    Ok(ToolhelpMainImage
-    {
+    Ok(ToolhelpMainImage {
         base_address: entry.modBaseAddr as usize,
         image_size: entry.modBaseSize as usize,
         path: PathBuf::from(OsString::from_wide(&entry.szExePath[..path_length])),

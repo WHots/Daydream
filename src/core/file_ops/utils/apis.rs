@@ -61,22 +61,16 @@ pub fn collect_file_api_imports(file: &ValidatedPeFile) -> Vec<FileApiImport>
         return imports;
     }
 
-    let iat_rvas: HashSet<usize> = imports
-        .iter()
-        .map(|api_import| api_import.iat_rva)
-        .collect();
+    let iat_rvas: HashSet<usize> = imports.iter().map(|api_import| api_import.iat_rva).collect();
     let mut xrefs_by_iat = collect_iat_xrefs(file, &iat_rvas);
 
     for api_import in &mut imports
     {
-        api_import.xrefs = xrefs_by_iat
-            .remove(&api_import.iat_rva)
-            .unwrap_or_default();
+        api_import.xrefs = xrefs_by_iat.remove(&api_import.iat_rva).unwrap_or_default();
     }
 
     imports
 }
-
 
 impl fmt::Display for FileApiImport
 {
@@ -84,20 +78,11 @@ impl fmt::Display for FileApiImport
     {
         match self.file_offset
         {
-            Some(file_offset) => write!(
-                formatter,
-                "{}!{}: File offset 0x{:08X} | IAT RVA 0x{:08X}",
-                self.library_name, self.import_name, file_offset, self.iat_rva
-            ),
-            None => write!(
-                formatter,
-                "{}!{}: File offset N/A | IAT RVA 0x{:08X}",
-                self.library_name, self.import_name, self.iat_rva
-            ),
+            Some(file_offset) => write!(formatter, "{}!{}: File offset 0x{:08X} | IAT RVA 0x{:08X}", self.library_name, self.import_name, file_offset, self.iat_rva),
+            None => write!(formatter, "{}!{}: File offset N/A | IAT RVA 0x{:08X}", self.library_name, self.import_name, self.iat_rva),
         }
     }
 }
-
 
 impl fmt::Display for FileApiXref
 {
@@ -109,11 +94,7 @@ impl fmt::Display for FileApiXref
             FileApiXrefKind::Jump => "Jump",
         };
 
-        write!(
-            formatter,
-            "{} XREF: RVA 0x{:08X}, File offset 0x{:08X}",
-            kind, self.rva, self.file_offset
-        )
+        write!(formatter, "{} XREF: RVA 0x{:08X}, File offset 0x{:08X}", kind, self.rva, self.file_offset)
     }
 }
 
@@ -131,15 +112,12 @@ fn collect_imports(file: &ValidatedPeFile) -> Vec<FileApiImport>
         Some(value) => value,
         None => return Vec::new(),
     };
-    let descriptor_count = (import_directory_size / IMPORT_DESCRIPTOR_SIZE)
-        .min(file.bytes.len() / IMPORT_DESCRIPTOR_SIZE);
+    let descriptor_count = (import_directory_size / IMPORT_DESCRIPTOR_SIZE).min(file.bytes.len() / IMPORT_DESCRIPTOR_SIZE);
     let mut imports = Vec::new();
 
     for descriptor_index in 0..descriptor_count
     {
-        let descriptor_rva = match descriptor_index
-            .checked_mul(IMPORT_DESCRIPTOR_SIZE)
-            .and_then(|offset| import_directory_rva.checked_add(offset))
+        let descriptor_rva = match descriptor_index.checked_mul(IMPORT_DESCRIPTOR_SIZE).and_then(|offset| import_directory_rva.checked_add(offset))
         {
             Some(value) => value,
             None =>
@@ -153,10 +131,7 @@ fn collect_imports(file: &ValidatedPeFile) -> Vec<FileApiImport>
             Some(value) => value,
             None =>
             {
-                eprintln!(
-                    "failed to read import descriptor {} at RVA 0x{:08X}",
-                    descriptor_index, descriptor_rva
-                );
+                eprintln!("failed to read import descriptor {} at RVA 0x{:08X}", descriptor_index, descriptor_rva);
                 break;
             }
         };
@@ -179,21 +154,11 @@ fn collect_imports(file: &ValidatedPeFile) -> Vec<FileApiImport>
             Some(value) if !value.is_empty() => value,
             _ =>
             {
-                eprintln!(
-                    "failed to read the library name of import descriptor {} at RVA 0x{:08X}",
-                    descriptor_index, library_name_rva
-                );
+                eprintln!("failed to read the library name of import descriptor {} at RVA 0x{:08X}", descriptor_index, library_name_rva);
                 continue;
             }
         };
-        let lookup_table_rva = if original_first_thunk != 0
-        {
-            original_first_thunk
-        }
-        else
-        {
-            first_thunk
-        };
+        let lookup_table_rva = if original_first_thunk != 0 { original_first_thunk } else { first_thunk };
 
         collect_descriptor_imports(file, library_name, lookup_table_rva, first_thunk, &mut imports);
     }
@@ -212,30 +177,19 @@ fn collect_imports(file: &ValidatedPeFile) -> Vec<FileApiImport>
 /// Appends nothing when the lookup table RVA is unmapped; entries with
 /// unreadable or empty names, or overflowing offsets, are skipped. Failures
 /// are reported on stderr.
-fn collect_descriptor_imports(
-    file: &ValidatedPeFile,
-    library_name: Box<str>,
-    lookup_table_rva: usize,
-    first_thunk_rva: usize,
-    imports: &mut Vec<FileApiImport>,
-)
+fn collect_descriptor_imports(file: &ValidatedPeFile, library_name: Box<str>, lookup_table_rva: usize, first_thunk_rva: usize, imports: &mut Vec<FileApiImport>)
 {
     let lookup_bytes = match mapped_bytes_from_rva(file, lookup_table_rva)
     {
         Some(value) => value,
         None =>
         {
-            eprintln!(
-                "failed to map the {} import lookup table at RVA 0x{:08X}",
-                library_name, lookup_table_rva
-            );
+            eprintln!("failed to map the {} import lookup table at RVA 0x{:08X}", library_name, lookup_table_rva);
             return;
         }
     };
 
-    for (thunk_index, thunk_bytes) in lookup_bytes
-        .chunks_exact(IMPORT_LOOKUP_ENTRY_SIZE)
-        .enumerate()
+    for (thunk_index, thunk_bytes) in lookup_bytes.chunks_exact(IMPORT_LOOKUP_ENTRY_SIZE).enumerate()
     {
         let thunk_value = match read_u64(thunk_bytes, 0)
         {
@@ -263,10 +217,7 @@ fn collect_descriptor_imports(
                 Ok(value) => value,
                 Err(_) =>
                 {
-                    eprintln!(
-                        "{} import thunk {} value 0x{:016X} does not fit an RVA",
-                        library_name, thunk_index, thunk_value
-                    );
+                    eprintln!("{} import thunk {} value 0x{:016X} does not fit an RVA", library_name, thunk_index, thunk_value);
                     continue;
                 }
             };
@@ -285,17 +236,12 @@ fn collect_descriptor_imports(
                 Some(value) if !value.is_empty() => value,
                 _ =>
                 {
-                    eprintln!(
-                        "failed to read the {} import name at RVA 0x{:08X}",
-                        library_name, function_name_rva
-                    );
+                    eprintln!("failed to read the {} import name at RVA 0x{:08X}", library_name, function_name_rva);
                     continue;
                 }
             }
         };
-        let iat_rva = match thunk_index
-            .checked_mul(IMPORT_LOOKUP_ENTRY_SIZE)
-            .and_then(|offset| first_thunk_rva.checked_add(offset))
+        let iat_rva = match thunk_index.checked_mul(IMPORT_LOOKUP_ENTRY_SIZE).and_then(|offset| first_thunk_rva.checked_add(offset))
         {
             Some(value) => value,
             None =>
@@ -305,13 +251,11 @@ fn collect_descriptor_imports(
             }
         };
 
-        imports.push(FileApiImport
-        {
+        imports.push(FileApiImport {
             library_name: library_name.clone(),
             import_name,
             iat_rva,
-            file_offset: read_mapped_bytes(file, iat_rva, IMPORT_LOOKUP_ENTRY_SIZE)
-                .and_then(|_| rva_to_file_offset(file, iat_rva)),
+            file_offset: read_mapped_bytes(file, iat_rva, IMPORT_LOOKUP_ENTRY_SIZE).and_then(|_| rva_to_file_offset(file, iat_rva)),
             xrefs: Vec::new(),
         });
     }
@@ -342,18 +286,13 @@ fn collect_iat_xrefs(file: &ValidatedPeFile, iat_rvas: &HashSet<usize>) -> HashM
             Some(value) if value <= file.bytes.len() => value,
             _ =>
             {
-                eprintln!(
-                    "executable section at RVA 0x{:08X} has raw data outside the file",
-                    section.virtual_address
-                );
+                eprintln!("executable section at RVA 0x{:08X} has raw data outside the file", section.virtual_address);
                 continue;
             }
         };
         let mut opcode_file_offset = section.raw_offset;
 
-        while opcode_file_offset
-            .checked_add(6)
-            .is_some_and(|instruction_end| instruction_end <= section_end)
+        while opcode_file_offset.checked_add(6).is_some_and(|instruction_end| instruction_end <= section_end)
         {
             if file.bytes[opcode_file_offset] != 0xFF
             {
@@ -371,21 +310,13 @@ fn collect_iat_xrefs(file: &ValidatedPeFile, iat_rvas: &HashSet<usize>) -> HashM
                     continue;
                 }
             };
-            let displacement = i32::from_le_bytes([
-                file.bytes[opcode_file_offset + 2],
-                file.bytes[opcode_file_offset + 3],
-                file.bytes[opcode_file_offset + 4],
-                file.bytes[opcode_file_offset + 5],
-            ]);
+            let displacement = i32::from_le_bytes([file.bytes[opcode_file_offset + 2], file.bytes[opcode_file_offset + 3], file.bytes[opcode_file_offset + 4], file.bytes[opcode_file_offset + 5]]);
             let opcode_delta = match opcode_file_offset.checked_sub(section.raw_offset)
             {
                 Some(value) => value,
                 None =>
                 {
-                    eprintln!(
-                        "opcode file offset 0x{:08X} fell below its section start",
-                        opcode_file_offset
-                    );
+                    eprintln!("opcode file offset 0x{:08X} fell below its section start", opcode_file_offset);
                     break;
                 }
             };
@@ -419,25 +350,14 @@ fn collect_iat_xrefs(file: &ValidatedPeFile, iat_rvas: &HashSet<usize>) -> HashM
 
             if iat_rvas.contains(&iat_rva)
             {
-                let instruction_file_offset = if opcode_file_offset > section.raw_offset
-                    && matches!(file.bytes[opcode_file_offset - 1], 0x40..=0x4F)
-                {
-                    opcode_file_offset - 1
-                }
-                else
-                {
-                    opcode_file_offset
-                };
+                let instruction_file_offset = if opcode_file_offset > section.raw_offset && matches!(file.bytes[opcode_file_offset - 1], 0x40..=0x4F) { opcode_file_offset - 1 } else { opcode_file_offset };
                 let instruction_delta = instruction_file_offset - section.raw_offset;
                 let instruction_rva = match section.virtual_address.checked_add(instruction_delta)
                 {
                     Some(value) => value,
                     None =>
                     {
-                        eprintln!(
-                            "instruction RVA overflowed at file offset 0x{:08X}",
-                            instruction_file_offset
-                        );
+                        eprintln!("instruction RVA overflowed at file offset 0x{:08X}", instruction_file_offset);
                         opcode_file_offset += 6;
                         continue;
                     }
@@ -448,8 +368,7 @@ fn collect_iat_xrefs(file: &ValidatedPeFile, iat_rvas: &HashSet<usize>) -> HashM
                     thunk_iat_by_rva.insert(instruction_rva, iat_rva);
                 }
 
-                xrefs_by_iat.entry(iat_rva).or_default().push(FileApiXref
-                {
+                xrefs_by_iat.entry(iat_rva).or_default().push(FileApiXref {
                     kind,
                     rva: instruction_rva,
                     file_offset: instruction_file_offset,
@@ -476,9 +395,7 @@ fn collect_iat_xrefs(file: &ValidatedPeFile, iat_rvas: &HashSet<usize>) -> HashM
             };
             let mut opcode_file_offset = section.raw_offset;
 
-            while opcode_file_offset
-                .checked_add(5)
-                .is_some_and(|instruction_end| instruction_end <= section_end)
+            while opcode_file_offset.checked_add(5).is_some_and(|instruction_end| instruction_end <= section_end)
             {
                 let kind = match file.bytes[opcode_file_offset]
                 {
@@ -490,12 +407,7 @@ fn collect_iat_xrefs(file: &ValidatedPeFile, iat_rvas: &HashSet<usize>) -> HashM
                         continue;
                     }
                 };
-                let displacement = i32::from_le_bytes([
-                    file.bytes[opcode_file_offset + 1],
-                    file.bytes[opcode_file_offset + 2],
-                    file.bytes[opcode_file_offset + 3],
-                    file.bytes[opcode_file_offset + 4],
-                ]);
+                let displacement = i32::from_le_bytes([file.bytes[opcode_file_offset + 1], file.bytes[opcode_file_offset + 2], file.bytes[opcode_file_offset + 3], file.bytes[opcode_file_offset + 4]]);
                 let opcode_delta = opcode_file_offset - section.raw_offset;
                 let opcode_rva = match section.virtual_address.checked_add(opcode_delta)
                 {
@@ -527,8 +439,7 @@ fn collect_iat_xrefs(file: &ValidatedPeFile, iat_rvas: &HashSet<usize>) -> HashM
 
                 if let Some(iat_rva) = thunk_iat_by_rva.get(&target_rva)
                 {
-                    xrefs_by_iat.entry(*iat_rva).or_default().push(FileApiXref
-                    {
+                    xrefs_by_iat.entry(*iat_rva).or_default().push(FileApiXref {
                         kind,
                         rva: opcode_rva,
                         file_offset: opcode_file_offset,
@@ -568,9 +479,7 @@ fn get_import_directory(file: &ValidatedPeFile) -> Option<(usize, usize)>
         }
     };
 
-    let optional_header_offset = match nt_header_offset
-        .checked_add(PE_SIGNATURE_SIZE)
-        .and_then(|offset| offset.checked_add(COFF_HEADER_SIZE))
+    let optional_header_offset = match nt_header_offset.checked_add(PE_SIGNATURE_SIZE).and_then(|offset| offset.checked_add(COFF_HEADER_SIZE))
     {
         Some(value) => value,
         None =>
@@ -580,9 +489,7 @@ fn get_import_directory(file: &ValidatedPeFile) -> Option<(usize, usize)>
         }
     };
 
-    let optional_header_size = match nt_header_offset
-        .checked_add(PE_SIGNATURE_SIZE + 16)
-        .and_then(|offset| read_u16(&file.bytes, offset))
+    let optional_header_size = match nt_header_offset.checked_add(PE_SIGNATURE_SIZE + 16).and_then(|offset| read_u16(&file.bytes, offset))
     {
         Some(value) => value as usize,
         None =>
@@ -602,9 +509,7 @@ fn get_import_directory(file: &ValidatedPeFile) -> Option<(usize, usize)>
         }
     };
 
-    let directory_count = match optional_header_offset
-        .checked_add(OPTIONAL_HEADER_DATA_DIRECTORY_COUNT_OFFSET)
-        .and_then(|offset| read_u32(&file.bytes, offset))
+    let directory_count = match optional_header_offset.checked_add(OPTIONAL_HEADER_DATA_DIRECTORY_COUNT_OFFSET).and_then(|offset| read_u32(&file.bytes, offset))
     {
         Some(value) => value as usize,
         None =>
@@ -620,10 +525,7 @@ fn get_import_directory(file: &ValidatedPeFile) -> Option<(usize, usize)>
         return None;
     }
 
-    let import_directory_offset = match IMAGE_DIRECTORY_ENTRY_IMPORT
-        .checked_mul(DATA_DIRECTORY_SIZE)
-        .and_then(|offset| OPTIONAL_HEADER_DATA_DIRECTORY_OFFSET.checked_add(offset))
-        .and_then(|offset| optional_header_offset.checked_add(offset))
+    let import_directory_offset = match IMAGE_DIRECTORY_ENTRY_IMPORT.checked_mul(DATA_DIRECTORY_SIZE).and_then(|offset| OPTIONAL_HEADER_DATA_DIRECTORY_OFFSET.checked_add(offset)).and_then(|offset| optional_header_offset.checked_add(offset))
     {
         Some(value) => value,
         None =>
@@ -658,7 +560,7 @@ fn get_import_directory(file: &ValidatedPeFile) -> Option<(usize, usize)>
             return None;
         }
     };
-    
+
     let import_directory_size = match read_u32(&file.bytes, import_directory_offset + 4)
     {
         Some(value) => value as usize,
@@ -671,10 +573,7 @@ fn get_import_directory(file: &ValidatedPeFile) -> Option<(usize, usize)>
 
     if import_directory_rva == 0 || import_directory_size < IMPORT_DESCRIPTOR_SIZE
     {
-        eprintln!(
-            "import directory RVA 0x{:08X} with size 0x{:08X} holds no descriptors",
-            import_directory_rva, import_directory_size
-        );
+        eprintln!("import directory RVA 0x{:08X} with size 0x{:08X} holds no descriptors", import_directory_rva, import_directory_size);
         return None;
     }
 

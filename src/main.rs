@@ -15,19 +15,12 @@ mod core
 
         pub(crate) mod utils
         {
-            #[allow(dead_code)]
             pub(crate) mod apis;
-            #[allow(dead_code)]
             pub(crate) mod pdb;
-            #[allow(dead_code)]
             pub(crate) mod scanning;
-            #[allow(dead_code)]
             pub(crate) mod sections;
-            #[allow(dead_code)]
             pub(crate) mod strings;
-            #[allow(dead_code)]
             pub(crate) mod supports;
-            #[allow(dead_code)]
             pub(crate) mod validate;
         }
     }
@@ -57,31 +50,24 @@ mod core
 
         pub(crate) mod utils
         {
-            #[allow(dead_code)]
             pub(crate) mod detect_code_section_utils;
             pub(crate) mod foundation
             {
                 pub(crate) mod validate_pe;
             }
-            #[allow(dead_code)]
             pub(crate) mod importutils;
             pub(crate) mod memutils;
-            #[allow(dead_code)]
             pub(crate) mod pdbutils;
             pub(crate) mod pe_utils;
-            #[allow(dead_code)]
             pub(crate) mod processutils;
             pub(crate) mod strings;
-            #[allow(dead_code)]
             pub(crate) mod stringdumputils;
-            #[allow(dead_code)]
             pub(crate) mod tebutils;
         }
     }
 
     pub(crate) mod global_utils
     {
-        #[allow(dead_code)]
         pub(crate) mod fileutils;
     }
 
@@ -130,7 +116,7 @@ fn main() -> ExitCode
             };
         }
     };
-    
+
     let target = match arguments.next()
     {
         Some(value) => value,

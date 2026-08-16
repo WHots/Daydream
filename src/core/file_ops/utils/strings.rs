@@ -12,20 +12,6 @@ pub struct FileString
 }
 
 
-/// Reads and decodes a string beginning at an exact raw file offset.
-/// `file`: the validated EXE or DLL containing the string data.
-/// `file_offset`: the raw byte offset where decoding should begin.
-///
-/// Returns a structured `FileString` when the offset begins with printable ASCII,
-/// UTF-8, or UTF-16LE data.
-pub fn read_file_string(file: &ValidatedPeFile, file_offset: usize) -> Option<FileString>
-{
-    let candidate = read_string_candidate(&file.bytes, file_offset)?;
-
-    build_file_string(file, file_offset, candidate)
-}
-
-
 /// Collects printable strings from an already-validated raw PE file.
 /// `file`: the validated EXE or DLL whose bytes should be scanned once.
 /// `minimum_chars`: the minimum decoded character count required for a result.
@@ -84,8 +70,7 @@ fn read_string_candidate(data: &[u8], offset: usize) -> Option<StringCandidate>
 
     if utf16le_length > 0
     {
-        return Some(StringCandidate
-        {
+        return Some(StringCandidate {
             encoding: StringEncoding::Utf16Le,
             byte_length: utf16le_length * 2,
             character_count: utf16le_length,
@@ -102,8 +87,7 @@ fn read_string_candidate(data: &[u8], offset: usize) -> Option<StringCandidate>
         {
             if value.len() > ascii_length
             {
-                return Some(StringCandidate
-                {
+                return Some(StringCandidate {
                     encoding: StringEncoding::Utf8,
                     byte_length: value.len(),
                     character_count: value.chars().count(),
@@ -115,8 +99,7 @@ fn read_string_candidate(data: &[u8], offset: usize) -> Option<StringCandidate>
 
     if ascii_length > 0
     {
-        return Some(StringCandidate
-        {
+        return Some(StringCandidate {
             encoding: StringEncoding::Ascii,
             byte_length: ascii_length,
             character_count: ascii_length,
@@ -129,22 +112,16 @@ fn read_string_candidate(data: &[u8], offset: usize) -> Option<StringCandidate>
 
 
 /// Builds an owned file-string record from a measured candidate.
-fn build_file_string(
-    file: &ValidatedPeFile,
-    file_offset: usize,
-    candidate: StringCandidate,
-) -> Option<FileString>
+fn build_file_string(file: &ValidatedPeFile, file_offset: usize, candidate: StringCandidate) -> Option<FileString>
 {
     let value = match candidate.encoding
     {
         StringEncoding::Ascii => strings::read_ascii(&file.bytes, file_offset)?,
         StringEncoding::Utf16Le => strings::read_utf16le(&file.bytes, file_offset)?,
         StringEncoding::Utf8 => candidate.utf8_value?,
-        StringEncoding::Unknown => return None,
     };
 
-    Some(FileString
-    {
+    Some(FileString {
         value: value.into_boxed_str(),
         encoding: candidate.encoding,
         file_offset,

@@ -36,8 +36,7 @@ pub struct FileTriageCollection<'a>
 /// Returns one collection bundle suitable for console display and JSON persistence.
 pub fn collect_file_triage(file: &ValidatedPeFile, minimum_string_chars: usize) -> FileTriageCollection<'_>
 {
-    FileTriageCollection
-    {
+    FileTriageCollection {
         sections: collect_file_sections(file),
         imports: collect_file_api_imports(file),
         debug_entries: collect_file_debug_directory(file),
@@ -83,7 +82,8 @@ fn build_file_metadata_json(target_path: &Path, file: &ValidatedPeFile, sha256: 
     json!
     ({
         "target":
-        {
+
+      {
             "path": target_path.display().to_string(),
             "file_name": target_path.file_name().map(|value| value.to_string_lossy().into_owned()),
             "file_stem": target_path.file_stem().map(|value| value.to_string_lossy().into_owned()),
@@ -96,7 +96,8 @@ fn build_file_metadata_json(target_path: &Path, file: &ValidatedPeFile, sha256: 
             "raw_size_hex": format!("0x{:X}", file.bytes.len())
         },
         "pe_header":
-        {
+
+      {
             "machine": file.machine,
             "machine_hex": format!("0x{:04X}", file.machine),
             "timestamp": file.timestamp,
@@ -138,12 +139,8 @@ fn build_sections_json(sections: &[PeSectionInfo]) -> Value
     let values = sections
         .iter()
         .enumerate()
-        .map(|(index, section)|
-        {
-            let content = section.content
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<String>>();
+        .map(|(index, section)| {
+            let content = section.content.iter().map(ToString::to_string).collect::<Vec<String>>();
 
             json!
             ({
@@ -151,7 +148,8 @@ fn build_sections_json(sections: &[PeSectionInfo]) -> Value
                 "name": section.name.as_ref(),
                 "content": content,
                 "memory":
-                {
+
+              {
                     "readable": section.memory.readable,
                     "writable": section.memory.writable,
                     "executable": section.memory.executable,
@@ -159,14 +157,16 @@ fn build_sections_json(sections: &[PeSectionInfo]) -> Value
                     "discardable": section.memory.discardable
                 },
                 "location":
-                {
+
+              {
                     "rva": section.rva,
                     "rva_hex": format!("0x{:08X}", section.rva),
                     "file_offset": section.file_offset,
                     "file_offset_hex": format!("0x{:08X}", section.file_offset)
                 },
                 "size":
-                {
+
+              {
                     "virtual": section.virtual_size,
                     "virtual_bytes": section.virtual_size,
                     "virtual_mb": bytes_to_megabytes(section.virtual_size),
@@ -197,12 +197,11 @@ fn build_imports_json(imports: &[FileApiImport]) -> Value
 {
     let values = imports
         .iter()
-        .map(|api_import|
-        {
-            let xrefs = api_import.xrefs
+        .map(|api_import| {
+            let xrefs = api_import
+                .xrefs
                 .iter()
-                .map(|xref|
-                {
+                .map(|xref| {
                     json!
                     ({
                         "kind": api_xref_kind_name(xref.kind),
@@ -219,7 +218,8 @@ fn build_imports_json(imports: &[FileApiImport]) -> Value
                 "library": api_import.library_name.as_ref(),
                 "name": api_import.import_name.as_ref(),
                 "iat":
-                {
+
+              {
                     "rva": api_import.iat_rva,
                     "rva_hex": format!("0x{:08X}", api_import.iat_rva),
                     "file_offset": api_import.file_offset,
@@ -247,25 +247,27 @@ fn build_debug_directory_json(entries: &[FileDebugEntry<'_>]) -> Value
 {
     let values = entries
         .iter()
-        .map(|entry|
-        {
+        .map(|entry| {
             json!
             ({
                 "index": entry.index,
                 "type":
-                {
+
+              {
                     "name": entry.debug_type.to_string(),
                     "raw": entry.raw_type
                 },
                 "entry_location":
-                {
+
+              {
                     "rva": entry.entry_rva,
                     "rva_hex": format!("0x{:08X}", entry.entry_rva),
                     "file_offset": entry.entry_file_offset,
                     "file_offset_hex": format!("0x{:08X}", entry.entry_file_offset)
                 },
                 "header":
-                {
+
+              {
                     "characteristics": entry.characteristics,
                     "characteristics_hex": format!("0x{:08X}", entry.characteristics),
                     "timestamp": entry.timestamp,
@@ -278,7 +280,8 @@ fn build_debug_directory_json(entries: &[FileDebugEntry<'_>]) -> Value
                     "data_size_hex": format!("0x{:X}", entry.size_of_data)
                 },
                 "data_location":
-                {
+
+              {
                     "address_of_raw_data": entry.address_of_raw_data,
                     "address_of_raw_data_hex": format!("0x{:08X}", entry.address_of_raw_data),
                     "pointer_to_raw_data": entry.pointer_to_raw_data,
@@ -320,7 +323,8 @@ fn build_debug_details_json(entry: &FileDebugEntry<'_>) -> Value
             "status": "parsed",
             "kind": "vc_feature",
             "counts":
-            {
+
+          {
                 "pre_vc11": info.pre_vc11,
                 "c_cpp": info.c_cpp,
                 "gs": info.gs,
@@ -330,18 +334,21 @@ fn build_debug_details_json(entry: &FileDebugEntry<'_>) -> Value
         }),
         FileDebugDetails::Pogo(info) =>
         {
-            let groups = info.entries
+            let groups = info
+                .entries
                 .iter()
-                .map(|group| json!
-                ({
-                    "name": group.name.as_ref(),
-                    "rva": group.rva,
-                    "rva_hex": format!("0x{:08X}", group.rva),
-                    "size": group.size,
-                    "size_bytes": group.size,
-                    "size_mb": bytes_to_megabytes(group.size as usize),
-                    "size_hex": format!("0x{:X}", group.size)
-                }))
+                .map(|group| {
+                    json!
+                    ({
+                        "name": group.name.as_ref(),
+                        "rva": group.rva,
+                        "rva_hex": format!("0x{:08X}", group.rva),
+                        "size": group.size,
+                        "size_bytes": group.size,
+                        "size_mb": bytes_to_megabytes(group.size as usize),
+                        "size_hex": format!("0x{:X}", group.size)
+                    })
+                })
                 .collect::<Vec<Value>>();
 
             json!
@@ -420,8 +427,7 @@ fn build_codeview_json(info: &FileCodeViewInfo) -> Value
 {
     match info
     {
-        FileCodeViewInfo::Rsds
-        {
+        FileCodeViewInfo::Rsds {
             guid,
             age,
             path,
@@ -434,8 +440,7 @@ fn build_codeview_json(info: &FileCodeViewInfo) -> Value
             "age": age,
             "pdb_path": build_pdb_path_json(path)
         }),
-        FileCodeViewInfo::Nb10
-        {
+        FileCodeViewInfo::Nb10 {
             offset,
             signature,
             age,
@@ -525,15 +530,17 @@ fn build_signature_hits_json(hits: &[FileSignatureHit]) -> Value
 {
     let values = hits
         .iter()
-        .map(|hit| json!
-        ({
-            "trigger": hit.trigger,
-            "section": hit.section_name.as_ref(),
-            "rva": hit.rva,
-            "rva_hex": format!("0x{:08X}", hit.rva),
-            "file_offset": hit.file_offset,
-            "file_offset_hex": format!("0x{:08X}", hit.file_offset)
-        }))
+        .map(|hit| {
+            json!
+            ({
+                "trigger": hit.trigger,
+                "section": hit.section_name.as_ref(),
+                "rva": hit.rva,
+                "rva_hex": format!("0x{:08X}", hit.rva),
+                "file_offset": hit.file_offset,
+                "file_offset_hex": format!("0x{:08X}", hit.file_offset)
+            })
+        })
         .collect::<Vec<Value>>();
 
     json!
@@ -553,15 +560,17 @@ fn build_strings_json(strings: &[FileString], minimum_string_chars: usize) -> Va
 {
     let values = strings
         .iter()
-        .map(|file_string| json!
-        ({
-            "value": file_string.value.as_ref(),
-            "encoding": string_encoding_name(file_string.encoding),
-            "rva": file_string.rva,
-            "rva_hex": file_string.rva.map(|value| format!("0x{:08X}", value)),
-            "file_offset": file_string.file_offset,
-            "file_offset_hex": format!("0x{:08X}", file_string.file_offset)
-        }))
+        .map(|file_string| {
+            json!
+            ({
+                "value": file_string.value.as_ref(),
+                "encoding": string_encoding_name(file_string.encoding),
+                "rva": file_string.rva,
+                "rva_hex": file_string.rva.map(|value| format!("0x{:08X}", value)),
+                "file_offset": file_string.file_offset,
+                "file_offset_hex": format!("0x{:08X}", file_string.file_offset)
+            })
+        })
         .collect::<Vec<Value>>();
 
     json!
@@ -598,7 +607,6 @@ fn string_encoding_name(encoding: StringEncoding) -> &'static str
         StringEncoding::Ascii => "ascii",
         StringEncoding::Utf16Le => "utf16_le",
         StringEncoding::Utf8 => "utf8",
-        StringEncoding::Unknown => "unknown",
     }
 }
 

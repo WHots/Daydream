@@ -27,14 +27,22 @@
 ## Table of contents
 
 - [Overview](#overview)
+- [How Daydream works](#how-daydream-works)
+  - [Command dispatch](#command-dispatch)
+  - [Raw-file pipeline](#raw-file-pipeline)
+  - [Process pipeline](#process-pipeline)
+  - [Locations and identity](#locations-and-identity)
+  - [Fatal and partial failures](#fatal-and-partial-failures)
 - [Project status](#project-status)
 - [Intended usage](#intended-usage)
 - [Current capabilities](#current-capabilities)
 - [Requirements](#requirements)
+- [Dependency roles](#dependency-roles)
 - [Build and test](#build-and-test)
 - [Usage](#usage)
 - [Output structure](#output-structure)
 - [Pattern and opcode catalogs](#pattern-and-opcode-catalogs)
+- [Extending and integrating](#extending-and-integrating)
 - [Project layout](#project-layout)
 - [Accuracy and limitations](#accuracy-and-limitations)
 - [Development principles](#development-principles)
@@ -58,6 +66,126 @@ Daydream is a triage tool. It is not intended to automatically declare that a fi
 process is malicious. Collected values should be treated as analyst evidence and
 correlated with surrounding code, provenance, behavior, and other tooling.
 
+Daydream currently has no dynamically loaded plug-in system. In this document, a
+component "plugs in" by being declared in the binary's module tree, called by the
+appropriate orchestration layer, represented in its collection type, and serialized by
+the matching output layer. The exact extension points are documented below.
+
+## How Daydream works
+
+The crate is organized around two analysis pipelines. They deliberately do not share a
+target abstraction: a raw file has raw offsets and immutable bytes, while a process has
+virtual addresses, changing memory protections, unavailable ranges, and an independently
+validated disk image. Keeping those paths separate prevents a file parser from silently
+assuming process-memory semantics, or the process path from treating mapped bytes like a
+raw file.
+
+```text
+                         src/main.rs
+                              |
+                   parse zero or two arguments
+                         /             \
+              -f <path>                 -p <pid> / no arguments
+                  |                                |
+          process_file(...)                 process_target(...)
+                  |                                |
+       validate one raw PE                 open + verify handle access
+                  |                                |
+     collect from shared file bytes       validate PEB + mapped main image
+                  |                                |
+       print summary + save JSON          snapshot once + run collectors
+                                                   |
+                                          save versioned JSON
+```
+
+### Command dispatch
+
+`src/main.rs` owns the complete module declaration tree and the CLI. It accepts exactly
+one mode/value pair. `-f` calls `file_ops::file_processing::process_file`; `-p` calls
+`process_ops::process_processing::process_target`. With no arguments, it passes
+`std::process::id()` to process mode, so Daydream analyzes its own running image. Invalid
+mode names, missing values, extra arguments, and non-numeric PIDs fail before analysis.
+
+This is a binary crate, not a library crate. Most reusable-looking functions are
+`pub(crate)` and are wired together internally; there is currently no stable Rust API
+for another crate to import.
+
+### Raw-file pipeline
+
+Raw-file mode follows this sequence:
+
+1. `validate_target_file` opens the target read-only with Windows file sharing, reads it
+   once, and constructs a `ValidatedPeFile` that owns the bytes and checked PE metadata.
+   It accepts AMD64 PE32+ executable images, rejects DLLs, validates section and entry
+   point ranges, and caps the in-memory file at `0x10000000` bytes (256 MiB).
+2. `collect_file_triage` lends that one validated object to the section, import/IAT,
+   debug-directory, signature, and string collectors. Collectors do not reopen or execute
+   the target.
+3. `process_file` prints the human-readable summary.
+4. `save_file_triage` computes SHA-256 and Shannon entropy, creates the output layout,
+   and serializes each result as pretty JSON.
+
+The raw-file output root is content-addressed with the SHA-256 digest. Running the same
+scan again removes and recreates that exact output root before writing the new results.
+
+### Process pipeline
+
+Process mode follows a stricter identity and snapshot sequence:
+
+1. `OpenProcess` requests only `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ`.
+   `CleanHandle` owns the handle and closes it on drop, while `NtQueryObject` confirms the
+   handle actually contains the requested access mask.
+2. `validate_process_peb` cross-checks the process ID from the handle and native process
+   information, locates and validates the PEB, reads `BeingDebugged` and the main-image
+   base, validates the mapped x64 PE, and compares its base/size with the first Toolhelp
+   module entry.
+3. Daydream tries to validate and hash the executable path reported by Toolhelp. This raw
+   image is an optional baseline; failure does not prevent ordinary mapped-image triage.
+4. `read_validated_image` creates one bounded, sparse-aware `ValidatedPeSnapshot`. Its PE
+   identity must still match the earlier validation. Loader-discarded ranges that cannot
+   be read are retained as explicit unavailable ranges.
+5. `collect_validated_process_triage` passes the same validated process and snapshot
+   through PE-section collection, code-section scoring, signature scanning, opcode
+   decoding/baseline comparison, PDB parsing, imports/IAT xrefs, main-image strings, TEB
+   collection, and trusted stack-string scanning.
+6. `save_process_triage` writes process schema version 2 JSON. The progress display uses
+   one updating stderr line; detailed evidence goes to the output files.
+
+The disk baseline matters most to opcode classification. Daydream accepts it only after
+its validated PE headers and section table match the mapped image. Loader relocation
+ranges are also checked before changed mapped bytes are described as trap differences.
+If the baseline is missing, invalid, or identity-mismatched, the JSON reports that status
+and disables only the evidence that depends on a safe comparison.
+
+### Locations and identity
+
+Daydream keeps location systems explicit instead of treating them as interchangeable:
+
+| Location | Meaning | Availability |
+| --- | --- | --- |
+| File offset | Byte position in the raw executable | Only for raw-backed bytes |
+| RVA | Offset from the PE image base | Primary shared PE coordinate |
+| Process address | `module_base + RVA` in the target | Process mode only, if addition is valid |
+| Section | PE section containing the RVA | When a validated section covers it |
+
+Process output roots prefer the SHA-256 of the validated backing file. If that file is
+unavailable or invalid, Daydream hashes the mapped snapshot for the output identity and
+records that no validated backing-file digest was available. Raw-file roots always use
+the hash of the exact file bytes analyzed.
+
+### Fatal and partial failures
+
+Failures before a trustworthy analysis base exists are fatal. Examples include failing
+to open a process, insufficient handle access, a process/PE identity mismatch, an invalid
+raw PE, inability to create the mapped-image snapshot, or failure to save the final
+output.
+
+Collector-local problems are retained where the collection model supports them. Missing
+PDB data, an unavailable import range, a thread that exits during enumeration, an
+untrusted TEB, or an unreadable stack region can therefore appear as typed status/error
+data beside the successful results. A completed command means the orchestration and save
+succeeded; it does not imply that every target byte was readable.
+
 ## Project status
 
 | Area | Current state |
@@ -66,7 +194,7 @@ correlated with surrounding code, provenance, behavior, and other tooling.
 | Supported operating system | Windows only |
 | Supported architecture | x86-64 / PE32+ |
 | Rust toolchain | Stable `x86_64-pc-windows-msvc` |
-| Process output schema | Version 1 |
+| Process output schema | Version 2 |
 | Public API stability | Not guaranteed |
 | Primary interface | Command-line application |
 
@@ -111,7 +239,13 @@ Current process collectors include:
 - Region-by-region string scanning between trusted TEB `StackLimit` and `StackBase`
   values.
 - Every configured x64 analyst signature from `patterns64.rs`.
-- Breakpoint, debug-trap, and debug-register opcode hits from `opcodes64.rs`.
+- Decoded breakpoint, debug-trap, and debug-register instructions at trusted x64
+  instruction boundaries.
+- Mapped software-trap differences identified by comparing process bytes with an
+  identity-matched disk baseline while excluding validated loader relocations.
+- Every raw opcode-byte occurrence with section, RVA, process address, and file-offset
+  metadata, plus aggregate counts and bounded heuristic samples of unchanged consecutive
+  `CC` padding candidates.
 - RVA, process address, section, and raw-file offset metadata where applicable.
 
 Process mode keeps the terminal quiet during normal collection. It displays one updating
@@ -132,7 +266,8 @@ Current file collectors include:
 - `RSDS`, `NB10`, POGO, VC feature, reproducible-build, checksum, miscellaneous, and
   embedded portable PDB-related records where supported.
 - ASCII, UTF-8, and UTF-16LE string extraction.
-- Wildcard-aware executable-section scanning through `X64_FILE_SCAN_SIGNATURES`.
+- Wildcard-aware scanning of every raw-backed executable section through
+  `X64_FILE_SCAN_SIGNATURES`, retaining repeated and overlapping matches.
 
 File mode currently prints its collected summary to the console and also saves organized
 JSON output.
@@ -158,6 +293,23 @@ components = ["rustfmt", "clippy"]
 
 Some protected, elevated, cross-session, security-sensitive, or architecture-mismatched
 processes may remain inaccessible even when Daydream itself runs correctly.
+
+## Dependency roles
+
+The dependency set is intentionally small:
+
+| Dependency | Role in Daydream |
+| --- | --- |
+| `windows-sys` | Low-level Win32 types, constants, process/thread APIs, Toolhelp snapshots, memory information, file access, console behavior, and Windows cryptography |
+| `iced-x86` | x64 instruction decoding, instruction-boundary discovery, flow-control traversal, and semantic classification of breakpoint/debug-register instructions |
+| `serde_json` | Construction and pretty serialization of analyst-facing JSON artifacts |
+| Rust standard library | CLI parsing, paths/files, collections, checked arithmetic, owned buffers, and RAII |
+
+The small native declarations in `core/internal/imports/imports.rs` link directly to
+`ntdll` for `NtQueryObject`, `NtQueryInformationProcess`,
+`NtQueryInformationThread`, `NtReadVirtualMemory`, and `NtQueryVirtualMemory`.
+`core/internal/utils/handles.rs` wraps owned Win32 handles so normal and error exits close
+them consistently.
 
 ## Build and test
 
@@ -265,9 +417,11 @@ Key pattern outputs are:
 
 - `code_section.json` — selected code-section evidence and confidence.
 - `pattern_hits64.json` — the distinguished CRT entry signature and every configured
-  `X64_ANALYST_SIGNATURES` match.
-- `opcode_hits64.json` — every configured breakpoint/debug opcode match, including
-  ModR/M metadata where required.
+  `X64_ANALYST_SIGNATURES` match across every available mapped executable section.
+- `opcode_hits64.json` — decoded static instructions and mapped trap-difference evidence,
+  every raw opcode occurrence, disk-baseline, relocation, and decode diagnostics,
+  aggregate raw byte-match counts, and bounded heuristic samples of unchanged `CC`
+  padding runs.
 
 Process JSON preserves typed failure or partial-read information instead of silently
 dismissing unavailable data. Reusing the same process output root updates the generated
@@ -318,13 +472,12 @@ Each wildcard consumes exactly one byte; it is not a variable-length gap. After 
 a signature, add it to the catalog matching its intended scope:
 
 - `X64_CRT_STARTUP_SIGNATURES`
-- `X64_RUNTIME_ANCHOR_SIGNATURES`
-- `X64_ANTI_ANALYSIS_SIGNATURES`
 - `X64_FILE_SCAN_SIGNATURES`
 - `X64_ANALYST_SIGNATURES`
 
 Process pattern collection consumes `X64_ANALYST_SIGNATURES`. Raw-file scanning consumes
-`X64_FILE_SCAN_SIGNATURES`.
+`X64_FILE_SCAN_SIGNATURES`. Both scanners continue through the complete available range
+after a match, including overlapping occurrences; they do not stop after the first hit.
 
 ### Adding x64 opcode records
 
@@ -335,11 +488,98 @@ src/core/data/opcode_specific64/opcodes64.rs
 ```
 
 Each `OpcodeBytecode` provides a name, an exact opcode prefix, and a `requires_modrm`
-flag. Records intended for process scanning must be included in
-`X64_BREAKPOINT_OPCODE_BYTECODES`.
+flag. Records included in `X64_BREAKPOINT_OPCODE_BYTECODES` contribute aggregate raw
+byte-match counts and one location record for every occurrence in `opcode_hits64.json`.
+Actionable hits are classified separately from decoded x64 instructions reached through
+trusted control flow in the identity-matched disk image. Neither raw nor semantic
+collection has a fixed hit-count retention cap; allocation failures are reported through
+the corresponding `*_truncated` JSON field while scanning continues.
 
-For opcodes such as `0F 21` and `0F 23`, the collector requires and validates a trailing
-register-form ModR/M byte before recording a hit.
+For opcodes such as `0F 21` and `0F 23`, decoded hits require supported debug-register
+operands. Their raw aggregate counters also require a trailing register-form ModR/M
+byte.
+
+## Extending and integrating
+
+There are four common ways to plug new behavior into the current codebase.
+
+### Add a raw-file collector
+
+1. Put parsing logic under `src/core/file_ops/utils/` and make it consume
+   `&ValidatedPeFile`. Use the checked byte/RVA helpers in `supports.rs` before adding new
+   offset arithmetic.
+2. Declare the module in the `core::file_ops::utils` tree in `src/main.rs`; this project
+   currently uses an inline module tree rather than `mod.rs` files.
+3. Add the collector result to `FileTriageCollection` and invoke it once in
+   `collect_file_triage`.
+4. Add its JSON builder and write call in `file_triage_saves.rs`. If it needs a new output
+   directory, extend `FileTriageLayout` and `prepare_file_triage_layout` in `configs.rs`.
+5. Add console presentation in `file_processing.rs` only when an interactive summary is
+   useful; JSON is the integration surface for full results.
+6. Add focused parser/range tests and run the checks in [Build and test](#build-and-test).
+
+This path should never open, attach to, or execute the target.
+
+### Add a process collector
+
+1. Put process-specific logic under `src/core/process_ops/utils/`. Prefer consuming
+   `&ValidatedProcessPe` and `&ValidatedPeSnapshot` so the target is not independently
+   revalidated or reread.
+2. Declare the module in `src/main.rs`.
+3. Add a field to `ProcessTriageCollection` and call the collector from
+   `collect_validated_process_triage`. Keep expensive phases connected to the existing
+   progress callback.
+4. Preserve partial-read and unavailable-range information in a typed result instead of
+   flattening it into an empty collection.
+5. Add a JSON builder/write in `process_triage_saves.rs`; define stable directory and
+   file names in `process_ops/outputs/config.rs`.
+6. Increment `PROCESS_TRIAGE_SCHEMA_VERSION` when the change breaks the meaning or shape
+   expected by existing process-output consumers.
+
+Process collectors should use only the access already requested unless a feature has a
+documented need for more. Expanding the process access mask changes the tool's security
+and compatibility profile and should be treated as an architectural change.
+
+### Add a signature or opcode
+
+Catalog-only additions do not require another orchestrator:
+
+- Add a wildcard-aware signature to `patterns64.rs` and include it in the appropriate
+  catalog slice. File and process modes consume different catalog slices as described in
+  [Pattern and opcode catalogs](#pattern-and-opcode-catalogs).
+- Add an exact opcode prefix to `opcodes64.rs` and include it in
+  `X64_BREAKPOINT_OPCODE_BYTECODES`. If semantic classification is required, also extend
+  the decoded-instruction rules in `process_ops/utils/pe_utils.rs`; adding raw bytes to
+  the catalog alone creates per-occurrence and aggregate raw byte evidence, not a new
+  trusted semantic claim.
+
+Every new detection should document what the bytes prove, likely false-positive
+conditions, and whether a hit is raw, decoded, or baseline-difference evidence.
+
+### Consume Daydream from another tool
+
+The supported integration point today is the command plus its JSON output:
+
+```powershell
+$daydream = ".\target\release\daydream.exe"
+& $daydream -f "C:\Samples\target.exe"
+if ($LASTEXITCODE -ne 0)
+{
+    throw "Daydream analysis failed"
+}
+```
+
+Use the content-addressed output directory to associate results with a target. Process
+JSON includes `schema_version`; check it before relying on field shapes. Raw-file JSON
+does not yet carry an explicit schema version, so consumers should tolerate additional
+fields and treat its current shape as unstable. Numeric locations are generally paired
+with formatted hexadecimal strings for display, but automation should use the numeric
+field.
+
+Embedding Daydream as a Rust dependency would currently require a deliberate refactor:
+add a library target, move the inline module declarations out of `main.rs`, decide which
+types form a supported public API, and separate console/output policy from collection.
+Until that work is done, depending on internal module paths is not supported.
 
 ## Project layout
 
@@ -389,15 +629,24 @@ src/
         └── fileutils.rs            SHA-256, entropy, and JSON writing
 ```
 
-`src/core/internal/saves/structure.rs` also exists in the repository but is not currently
-declared by `src/main.rs`.
-
 ## Accuracy and limitations
 
-- A pattern or opcode hit proves only that matching bytes were present in the scanned
-  range. It does not prove malicious intent or execution.
-- Short opcode patterns—especially `INT3` (`0xCC`)—may also represent compiler padding,
-  alignment, data embedded in executable sections, or legitimate debugger behavior.
+- Pattern hits and per-occurrence raw opcode matches prove only that matching bytes were
+  present. Raw matches can include instruction operands, embedded data, padding, or
+  unreachable bytes and are not actionable decoded hits.
+- Classified opcode hits begin at instruction boundaries decoded from an
+  identity-matched disk baseline. Recursive decoding is seeded by validated x64 runtime
+  functions and the image entry point, so unreachable code and leaf functions without
+  discoverable control flow may be omitted.
+- A mapped trap-difference hit proves that current process bytes contain a supported trap
+  encoding at a boundary shared by current and disk-baseline decoding, while the
+  identity-matched disk bytes differ there. It does not prove when or how that difference
+  arose, who made it, that a debugger is active, or that the instruction executed.
+- Disk identity matching compares validated PE headers and the section table; it does not
+  prove that the path still names the exact file object originally mapped by the loader.
+- Unchanged consecutive `CC` runs outside decoded control flow are reported only as
+  heuristic padding candidates. They may still be intentional traps or undiscovered
+  code.
 - Wildcard patterns are byte patterns, not decoded instruction semantics.
 - File offsets may be unavailable for mapped bytes that do not correspond to raw-backed
   file data.

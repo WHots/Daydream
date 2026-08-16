@@ -15,7 +15,6 @@ pub struct HandleAccess
     granted_access: u32,
 }
 
-
 impl HandleAccess
 {
     /// Returns the access mask granted to the handle by the kernel.
@@ -25,6 +24,7 @@ impl HandleAccess
     {
         self.granted_access
     }
+
 
     /// Checks whether the granted access mask contains every required access bit.
     /// `required_access`: the complete access subset needed by the pending operation.
@@ -43,8 +43,7 @@ pub enum HandleAccessQueryError
 {
     QueryFailed
     {
-        status: NTSTATUS,
-        return_length: u32,
+        status: NTSTATUS, return_length: u32
     },
 }
 
@@ -54,7 +53,6 @@ pub struct CleanHandle
 {
     handle: HANDLE,
 }
-
 
 impl CleanHandle
 {
@@ -70,9 +68,12 @@ impl CleanHandle
         }
         else
         {
-            Some(Self { handle })
+            Some(Self {
+                handle,
+            })
         }
     }
+
 
     /// Returns the wrapped raw Windows handle.
     ///
@@ -81,6 +82,7 @@ impl CleanHandle
     {
         self.handle
     }
+
 
     /// Queries the access mask granted to the handle by the kernel.
     ///
@@ -91,35 +93,23 @@ impl CleanHandle
         let mut return_length = 0u32;
 
         // SAFETY: `information` is a valid output buffer for `ObjectBasicInformation`, and `self.handle` is non-null for every `CleanHandle`.
-        let status = unsafe
-        {
-            nt_query_object(
-                self.handle,
-                OBJECT_BASIC_INFORMATION_CLASS,
-                &mut information as *mut PUBLIC_OBJECT_BASIC_INFORMATION as *mut c_void,
-                size_of::<PUBLIC_OBJECT_BASIC_INFORMATION>() as u32,
-                &mut return_length,
-            )
-        };
+        let status = unsafe { nt_query_object(self.handle, OBJECT_BASIC_INFORMATION_CLASS, &mut information as *mut PUBLIC_OBJECT_BASIC_INFORMATION as *mut c_void, size_of::<PUBLIC_OBJECT_BASIC_INFORMATION>() as u32, &mut return_length) };
 
         if status < 0
         {
-            Err(HandleAccessQueryError::QueryFailed
-            {
+            Err(HandleAccessQueryError::QueryFailed {
                 status,
                 return_length,
             })
         }
         else
         {
-            Ok(HandleAccess
-            {
+            Ok(HandleAccess {
                 granted_access: information.GrantedAccess,
             })
         }
     }
 }
-
 
 impl Drop for CleanHandle
 {

@@ -2,9 +2,7 @@ use core::ffi::c_void;
 use core::mem::{size_of, zeroed};
 
 use windows_sys::Win32::Foundation::{HANDLE, NTSTATUS};
-use windows_sys::Win32::System::Memory::{
-    MEMORY_BASIC_INFORMATION, MEM_IMAGE, MEM_MAPPED, MEM_PRIVATE,
-};
+use windows_sys::Win32::System::Memory::{MEMORY_BASIC_INFORMATION, MEM_IMAGE, MEM_MAPPED, MEM_PRIVATE};
 
 use crate::core::internal::imports::imports::{nt_query_virtual_memory, nt_read_virtual_memory};
 
@@ -98,7 +96,10 @@ pub enum MemoryRegionQueryError
 {
     InvalidProcessHandle,
     NullBaseAddress,
-    QueryFailed { status: NTSTATUS },
+    QueryFailed
+    {
+        status: NTSTATUS,
+    },
 }
 
 
@@ -132,8 +133,7 @@ pub(crate) fn read_exact(process: HANDLE, total_bytes: usize, starting_address: 
 
     if read.bytes_read != total_bytes
     {
-        return Err(ProcessMemoryReadError::ReadIncomplete
-        {
+        return Err(ProcessMemoryReadError::ReadIncomplete {
             bytes_requested: total_bytes,
             bytes_read: read.bytes_read,
         });
@@ -177,8 +177,7 @@ pub fn query_region(process: HANDLE, address: usize) -> Result<MemoryRegion, Mem
 
     let information = query_basic_information(process, address)?;
 
-    Ok(MemoryRegion
-    {
+    Ok(MemoryRegion {
         base_address: information.BaseAddress as usize,
         allocation_base: information.AllocationBase as usize,
         region_size: information.RegionSize,
@@ -214,8 +213,7 @@ fn read_process_memory(process: HANDLE, total_bytes: usize, starting_address: us
 
     if starting_address.checked_add(total_bytes).is_none()
     {
-        return Err(ProcessMemoryReadError::AddressRangeOverflow
-        {
+        return Err(ProcessMemoryReadError::AddressRangeOverflow {
             starting_address,
             bytes_requested: total_bytes,
         });
@@ -226,13 +224,15 @@ fn read_process_memory(process: HANDLE, total_bytes: usize, starting_address: us
 
     if status < 0
     {
-        return Err(ProcessMemoryReadError::ReadFailed { status, bytes_read });
+        return Err(ProcessMemoryReadError::ReadFailed {
+            status,
+            bytes_read,
+        });
     }
 
     if bytes_read > total_bytes
     {
-        return Err(ProcessMemoryReadError::BytesReadExceededRequest
-        {
+        return Err(ProcessMemoryReadError::BytesReadExceededRequest {
             bytes_requested: total_bytes,
             bytes_read,
         });
@@ -240,8 +240,7 @@ fn read_process_memory(process: HANDLE, total_bytes: usize, starting_address: us
 
     bytes.truncate(bytes_read);
 
-    Ok(ProcessMemoryRead
-    {
+    Ok(ProcessMemoryRead {
         starting_address,
         bytes_requested: total_bytes,
         bytes_read,
@@ -261,12 +260,8 @@ fn create_read_buffer(total_bytes: usize) -> Result<Vec<u8>, ProcessMemoryReadEr
 {
     let mut buffer = Vec::new();
 
-    buffer.try_reserve_exact(total_bytes).map_err(|_|
-    {
-        ProcessMemoryReadError::BufferAllocationFailed
-        {
-            bytes_requested: total_bytes,
-        }
+    buffer.try_reserve_exact(total_bytes).map_err(|_| ProcessMemoryReadError::BufferAllocationFailed {
+        bytes_requested: total_bytes,
     })?;
 
     buffer.resize(total_bytes, 0);
@@ -296,7 +291,10 @@ fn find_pattern_matches(bytes: &[u8], starting_address: usize, search_pattern: &
         {
             if let Some(address) = starting_address.checked_add(offset)
             {
-                matches.push(ProcessMemoryMatch { offset, address });
+                matches.push(ProcessMemoryMatch {
+                    offset,
+                    address,
+                });
             }
         }
     }
@@ -316,10 +314,7 @@ fn read_virtual_memory(process: HANDLE, starting_address: usize, bytes: &mut [u8
     let mut bytes_read = 0usize;
 
     // SAFETY: the destination slice is writable for its full length, and the caller validates the process handle and address range before this native read.
-    let status = unsafe
-    {
-        nt_read_virtual_memory(process, starting_address as *const c_void, bytes.as_mut_ptr() as *mut c_void, bytes.len(), &mut bytes_read)
-    };
+    let status = unsafe { nt_read_virtual_memory(process, starting_address as *const c_void, bytes.as_mut_ptr() as *mut c_void, bytes.len(), &mut bytes_read) };
 
     (status, bytes_read)
 }
@@ -338,14 +333,13 @@ fn query_basic_information(process: HANDLE, address: usize) -> Result<MEMORY_BAS
     let mut return_length = 0usize;
 
     // SAFETY: `information` is a writable buffer of the exact requested size and remains valid for the duration of the native query.
-    let status = unsafe
-    {
-        nt_query_virtual_memory(process, address as *const c_void, MEMORY_BASIC_INFORMATION_CLASS, &mut information as *mut MEMORY_BASIC_INFORMATION as *mut c_void, size_of::<MEMORY_BASIC_INFORMATION>(), &mut return_length)
-    };
+    let status = unsafe { nt_query_virtual_memory(process, address as *const c_void, MEMORY_BASIC_INFORMATION_CLASS, &mut information as *mut MEMORY_BASIC_INFORMATION as *mut c_void, size_of::<MEMORY_BASIC_INFORMATION>(), &mut return_length) };
 
     if status < 0
     {
-        return Err(MemoryRegionQueryError::QueryFailed { status });
+        return Err(MemoryRegionQueryError::QueryFailed {
+            status,
+        });
     }
 
     Ok(information)

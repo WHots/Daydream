@@ -58,8 +58,7 @@ pub fn collect_file_sections(file: &ValidatedPeFile) -> Vec<PeSectionInfo>
 
     for section in file.sections.iter()
     {
-        sections.push(PeSectionInfo
-        {
+        sections.push(PeSectionInfo {
             name: section.name.clone(),
             content: collect_section_content(section.characteristics),
             memory: collect_section_memory(section.characteristics),
@@ -73,7 +72,6 @@ pub fn collect_file_sections(file: &ValidatedPeFile) -> Vec<PeSectionInfo>
 
     sections
 }
-
 
 impl fmt::Display for PeSectionContent
 {
@@ -89,7 +87,6 @@ impl fmt::Display for PeSectionContent
         formatter.write_str(name)
     }
 }
-
 
 impl fmt::Display for PeSectionMemory
 {
@@ -143,8 +140,7 @@ fn collect_section_content(characteristics: u32) -> Vec<PeSectionContent>
 /// Collects the declared memory traits from PE section characteristics.
 fn collect_section_memory(characteristics: u32) -> PeSectionMemory
 {
-    PeSectionMemory
-    {
+    PeSectionMemory {
         readable: characteristics & IMAGE_SCN_MEM_READ != 0,
         writable: characteristics & IMAGE_SCN_MEM_WRITE != 0,
         executable: characteristics & IMAGE_SCN_MEM_EXECUTE != 0,

@@ -1,18 +1,10 @@
 use core::mem::{size_of, zeroed};
 
 use windows_sys::Win32::Foundation::HANDLE;
-use windows_sys::Win32::System::Diagnostics::Debug::{
-    IMAGE_DATA_DIRECTORY, IMAGE_DIRECTORY_ENTRY_ARCHITECTURE, IMAGE_DIRECTORY_ENTRY_GLOBALPTR,
-    IMAGE_DIRECTORY_ENTRY_SECURITY, IMAGE_FILE_EXECUTABLE_IMAGE, IMAGE_FILE_HEADER,
-    IMAGE_NT_HEADERS64, IMAGE_NT_OPTIONAL_HDR64_MAGIC, IMAGE_OPTIONAL_HEADER64,
-    IMAGE_SCN_CNT_CODE, IMAGE_SCN_MEM_DISCARDABLE, IMAGE_SCN_MEM_EXECUTE,
-    IMAGE_SECTION_HEADER,
-};
+use windows_sys::Win32::System::Diagnostics::Debug::{IMAGE_DATA_DIRECTORY, IMAGE_DIRECTORY_ENTRY_ARCHITECTURE, IMAGE_DIRECTORY_ENTRY_GLOBALPTR, IMAGE_DIRECTORY_ENTRY_SECURITY, IMAGE_FILE_EXECUTABLE_IMAGE, IMAGE_FILE_HEADER, IMAGE_NT_HEADERS64, IMAGE_NT_OPTIONAL_HDR64_MAGIC, IMAGE_OPTIONAL_HEADER64, IMAGE_SCN_CNT_CODE, IMAGE_SCN_MEM_DISCARDABLE, IMAGE_SCN_MEM_EXECUTE, IMAGE_SECTION_HEADER};
 use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE, PAGE_GUARD, PAGE_NOACCESS};
 use windows_sys::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_AMD64;
-use windows_sys::Win32::System::SystemServices::{
-    IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE, IMAGE_NT_SIGNATURE,
-};
+use windows_sys::Win32::System::SystemServices::{IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE, IMAGE_NT_SIGNATURE};
 
 use crate::core::process_ops::utils::memutils::{self, MemoryRegion, MemoryRegionQueryError, MemoryRegionType, ProcessMemoryReadError};
 
@@ -51,7 +43,6 @@ const IMAGE_BASE_ALIGNMENT: u64 = 0x1_0000;
 
 /// Final PE data-directory slot reserved by the format.
 const RESERVED_DATA_DIRECTORY_INDEX: usize = 15;
-
 
 /// Owns safely copied headers and sections from mapped PE bytes.
 pub(crate) struct PeImage
@@ -388,8 +379,7 @@ pub(crate) fn parse_pe(pe_data: &[u8]) -> Result<PeImage, PeValidationError>
 
     if size_of_headers > pe_data.len()
     {
-        return Err(PeValidationError::HeadersOutsideData
-        {
+        return Err(PeValidationError::HeadersOutsideData {
             size_of_headers,
             data_size: pe_data.len(),
         });
@@ -399,8 +389,7 @@ pub(crate) fn parse_pe(pe_data: &[u8]) -> Result<PeImage, PeValidationError>
 
     if section_table_end > pe_data.len()
     {
-        return Err(PeValidationError::SectionTableOutsideData
-        {
+        return Err(PeValidationError::SectionTableOutsideData {
             section_table_end,
             data_size: pe_data.len(),
         });
@@ -408,8 +397,7 @@ pub(crate) fn parse_pe(pe_data: &[u8]) -> Result<PeImage, PeValidationError>
 
     let sections = read_section_headers(pe_data, section_table_offset, section_table_size, section_count)?;
 
-    Ok(PeImage
-    {
+    Ok(PeImage {
         nt_headers,
         nt_headers_offset,
         sections,
@@ -442,8 +430,7 @@ pub(crate) fn validate_parsed_pe(pe: &PeImage, data_size: usize) -> Result<(), P
 
     if validated_headers.image_size > data_size
     {
-        return Err(PeValidationError::ImageOutsideData
-        {
+        return Err(PeValidationError::ImageOutsideData {
             image_size: validated_headers.image_size,
             data_size,
         });
@@ -481,8 +468,7 @@ pub(crate) fn read_validated_image(process: HANDLE, validation: &ValidatedPeImag
     let (bytes, unavailable_ranges) = read_process_image_bytes(process, validation.base_address, &details.nt_headers, &details.sections)?;
     let pe = validate_matching_image(validation, &bytes)?;
 
-    Ok(ValidatedPeSnapshot
-    {
+    Ok(ValidatedPeSnapshot {
         bytes,
         pe,
         unavailable_ranges,
@@ -499,8 +485,7 @@ pub(crate) fn validate_matching_image(validation: &ValidatedPeImage, pe_data: &[
 {
     if pe_data.len() != validation.image_size
     {
-        return Err(PeValidationError::ValidatedImageSizeMismatch
-        {
+        return Err(PeValidationError::ValidatedImageSizeMismatch {
             expected_size: validation.image_size,
             actual_size: pe_data.len(),
         });
@@ -511,8 +496,7 @@ pub(crate) fn validate_matching_image(validation: &ValidatedPeImage, pe_data: &[
     let actual_entry_point_rva = pe.nt_headers.OptionalHeader.AddressOfEntryPoint as usize;
     let actual_section_count = pe.nt_headers.FileHeader.NumberOfSections;
 
-    let actual_validation = ValidatedPeImage
-    {
+    let actual_validation = ValidatedPeImage {
         base_address: validation.base_address,
         image_size: actual_image_size,
         entry_point_rva: actual_entry_point_rva,
@@ -521,6 +505,28 @@ pub(crate) fn validate_matching_image(validation: &ValidatedPeImage, pe_data: &[
     };
 
     validate_image_identity(validation, &actual_validation)?;
+
+    Ok(pe)
+}
+
+
+/// Validates raw-file PE headers against the exact identity captured from a loaded image.
+/// `validation`: trusted facts collected from the target's mapped main image.
+/// `file_data`: complete raw executable bytes containing the corresponding PE headers.
+///
+/// Returns parsed raw-file headers only when every semantic identity field matches.
+pub(crate) fn validate_backing_file_identity(validation: &ValidatedPeImage, file_data: &[u8]) -> Result<PeImage, PeValidationError>
+{
+    let pe = parse_pe(file_data)?;
+    let actual = ValidatedPeImage {
+        base_address: validation.base_address,
+        image_size: pe.nt_headers.OptionalHeader.SizeOfImage as usize,
+        entry_point_rva: pe.nt_headers.OptionalHeader.AddressOfEntryPoint as usize,
+        section_count: pe.nt_headers.FileHeader.NumberOfSections,
+        identity: create_pe_identity(&pe.nt_headers, &pe.sections)?,
+    };
+
+    validate_image_identity(validation, &actual)?;
 
     Ok(pe)
 }
@@ -613,12 +619,10 @@ fn validate_process_image_details(process: HANDLE, image_base_address: usize) ->
     // SAFETY: `IMAGE_DOS_HEADER` permits every bit pattern and contains no references.
     let dos_header = unsafe { read_remote_value::<IMAGE_DOS_HEADER>(process, image_base_address, PeReadTarget::DosHeader) }?;
     let nt_headers_offset = validate_dos_header(&dos_header)?;
-    let nt_headers_address = image_base_address.checked_add(nt_headers_offset).ok_or_else(||
-    {
+    let nt_headers_address = image_base_address.checked_add(nt_headers_offset).ok_or_else(|| {
         eprintln!("remote PE NT-header address overflowed");
 
-        PeValidationError::NtHeadersAddressOverflow
-        {
+        PeValidationError::NtHeadersAddressOverflow {
             base_address: image_base_address,
             nt_headers_offset,
         }
@@ -629,8 +633,7 @@ fn validate_process_image_details(process: HANDLE, image_base_address: usize) ->
     if image_base_address.checked_add(validated_headers.image_size).is_none()
     {
         eprintln!("remote PE image range overflowed");
-        return Err(PeValidationError::ImageRangeOverflow
-        {
+        return Err(PeValidationError::ImageRangeOverflow {
             base_address: image_base_address,
             image_size: validated_headers.image_size,
         });
@@ -642,8 +645,7 @@ fn validate_process_image_details(process: HANDLE, image_base_address: usize) ->
     validate_data_directory_layout(&nt_headers, &sections)?;
     validate_process_image_mapping(process, image_base_address, &nt_headers, &sections)?;
 
-    let validation = ValidatedPeImage
-    {
+    let validation = ValidatedPeImage {
         base_address: image_base_address,
         image_size: validated_headers.image_size,
         entry_point_rva: nt_headers.OptionalHeader.AddressOfEntryPoint as usize,
@@ -651,8 +653,7 @@ fn validate_process_image_details(process: HANDLE, image_base_address: usize) ->
         identity: create_pe_identity(&nt_headers, &sections)?,
     };
 
-    Ok(ValidatedProcessImageDetails
-    {
+    Ok(ValidatedProcessImageDetails {
         validation,
         nt_headers,
         sections,
@@ -674,19 +675,16 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
     if image_size > MAXIMUM_IMAGE_SNAPSHOT_SIZE
     {
         eprintln!("remote PE image is too large to materialize safely");
-        return Err(PeValidationError::ImageSnapshotSizeExceedsLimit
-        {
+        return Err(PeValidationError::ImageSnapshotSizeExceedsLimit {
             image_size,
             maximum_snapshot_size: MAXIMUM_IMAGE_SNAPSHOT_SIZE,
         });
     }
 
-    let image_end = image_base_address.checked_add(image_size).ok_or_else(||
-    {
+    let image_end = image_base_address.checked_add(image_size).ok_or_else(|| {
         eprintln!("remote PE snapshot range overflowed");
 
-        PeValidationError::ImageRangeOverflow
-        {
+        PeValidationError::ImageRangeOverflow {
             base_address: image_base_address,
             image_size,
         }
@@ -694,22 +692,18 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
     let mut bytes = Vec::new();
     let mut unavailable_ranges: Vec<UnavailablePeRange> = Vec::new();
 
-    bytes.try_reserve_exact(image_size).map_err(|_|
-    {
+    bytes.try_reserve_exact(image_size).map_err(|_| {
         eprintln!("failed to allocate the remote PE snapshot buffer");
 
-        PeValidationError::ImageBufferAllocationFailed
-        {
+        PeValidationError::ImageBufferAllocationFailed {
             image_size,
         }
     })?;
     bytes.resize(image_size, 0);
-    unavailable_ranges.try_reserve_exact(sections.len()).map_err(|_|
-    {
+    unavailable_ranges.try_reserve_exact(sections.len()).map_err(|_| {
         eprintln!("failed to allocate the discarded PE range buffer");
 
-        PeValidationError::ImageBufferAllocationFailed
-        {
+        PeValidationError::ImageBufferAllocationFailed {
             image_size,
         }
     })?;
@@ -722,8 +716,7 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
         if region_count == MAXIMUM_IMAGE_REGION_COUNT
         {
             eprintln!("remote PE snapshot exceeded the virtual-memory region limit");
-            return Err(PeValidationError::ImageRegionLimitExceeded
-            {
+            return Err(PeValidationError::ImageRegionLimitExceeded {
                 image_size,
                 maximum_region_count: MAXIMUM_IMAGE_REGION_COUNT,
             });
@@ -731,22 +724,18 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
 
         region_count += 1;
 
-        let region = memutils::query_region(process, address).map_err(|error|
-        {
+        let region = memutils::query_region(process, address).map_err(|error| {
             eprintln!("failed to query a remote PE snapshot region");
 
-            PeValidationError::ImageRegionQueryFailed
-            {
+            PeValidationError::ImageRegionQueryFailed {
                 address,
                 error,
             }
         })?;
-        let region_end = region.base_address.checked_add(region.region_size).ok_or_else(||
-        {
+        let region_end = region.base_address.checked_add(region.region_size).ok_or_else(|| {
             eprintln!("remote PE snapshot region range overflowed");
 
-            PeValidationError::ImageRegionRangeOverflow
-            {
+            PeValidationError::ImageRegionRangeOverflow {
                 base_address: region.base_address,
                 region_size: region.region_size,
             }
@@ -755,8 +744,7 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
         if region.base_address > address || region_end <= address
         {
             eprintln!("remote PE snapshot region did not cover the requested address");
-            return Err(PeValidationError::ImageRegionDidNotAdvance
-            {
+            return Err(PeValidationError::ImageRegionDidNotAdvance {
                 address,
                 region_end,
             });
@@ -774,12 +762,10 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
                 while read_address < range_end
                 {
                     let bytes_requested = (range_end - read_address).min(IMAGE_SNAPSHOT_READ_CHUNK_SIZE);
-                    let region_bytes = memutils::read_exact(process, bytes_requested, read_address).map_err(|error|
-                    {
+                    let region_bytes = memutils::read_exact(process, bytes_requested, read_address).map_err(|error| {
                         eprintln!("failed to read a committed remote PE snapshot region");
 
-                        PeValidationError::RemoteReadFailed
-                        {
+                        PeValidationError::RemoteReadFailed {
                             target: PeReadTarget::ImageSnapshot,
                             address: read_address,
                             error,
@@ -793,8 +779,7 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
                 }
             }
             ImageRegionDisposition::Padding =>
-            {
-            }
+            {}
             ImageRegionDisposition::Discarded =>
             {
                 let rva = address - image_base_address;
@@ -812,17 +797,14 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
 
                 if !merged
                 {
-                    unavailable_ranges.try_reserve(1).map_err(|_|
-                    {
+                    unavailable_ranges.try_reserve(1).map_err(|_| {
                         eprintln!("failed to grow the discarded PE range buffer");
 
-                        PeValidationError::ImageBufferAllocationFailed
-                        {
+                        PeValidationError::ImageBufferAllocationFailed {
                             image_size,
                         }
                     })?;
-                    unavailable_ranges.push(UnavailablePeRange
-                    {
+                    unavailable_ranges.push(UnavailablePeRange {
                         rva,
                         size,
                     });
@@ -831,8 +813,7 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
             ImageRegionDisposition::Unreadable =>
             {
                 eprintln!("committed remote PE data is not readable");
-                return Err(PeValidationError::UnreadableImageRegion
-                {
+                return Err(PeValidationError::UnreadableImageRegion {
                     address,
                     state: region.state,
                     protect: region.protect,
@@ -856,9 +837,8 @@ fn validate_image_identity(expected: &ValidatedPeImage, actual: &ValidatedPeImag
 {
     if actual.image_size != expected.image_size || actual.entry_point_rva != expected.entry_point_rva || actual.section_count != expected.section_count || actual.identity != expected.identity
     {
-        eprintln!("validated PE identity changed before the image snapshot completed");
-        return Err(PeValidationError::ValidatedImageIdentityMismatch
-        {
+        eprintln!("validated PE identities do not match");
+        return Err(PeValidationError::ValidatedImageIdentityMismatch {
             expected_image_size: expected.image_size,
             actual_image_size: actual.image_size,
             expected_entry_point_rva: expected.entry_point_rva,
@@ -891,8 +871,7 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
     let mut previous_raw_end = None;
     let mut entry_point_is_executable = entry_point_rva == 0;
     let mut first_code_section_rva = None;
-    let mut expected_section_rva = size_of_headers.checked_next_multiple_of(section_alignment).ok_or_else(||
-    {
+    let mut expected_section_rva = size_of_headers.checked_next_multiple_of(section_alignment).ok_or_else(|| {
         eprintln!("PE first-section alignment overflowed");
         PeValidationError::SectionTableRangeOverflow
     })?;
@@ -904,8 +883,7 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
         if section_rva < expected_section_rva
         {
             eprintln!("PE mapped section overlaps the preceding aligned section range");
-            return Err(PeValidationError::OverlappingSections
-            {
+            return Err(PeValidationError::OverlappingSections {
                 index,
                 previous_end_rva: previous_end_rva.unwrap_or(size_of_headers),
                 section_rva,
@@ -915,8 +893,7 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
         if section_rva != expected_section_rva
         {
             eprintln!("PE mapped sections are not aligned and adjacent");
-            return Err(PeValidationError::InvalidSectionLayout
-            {
+            return Err(PeValidationError::InvalidSectionLayout {
                 index,
                 section_rva,
             });
@@ -927,8 +904,7 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
         if mapped_size == 0
         {
             eprintln!("PE section has no mapped extent");
-            return Err(PeValidationError::InvalidSectionRange
-            {
+            return Err(PeValidationError::InvalidSectionRange {
                 index,
                 section_rva,
                 mapped_size,
@@ -936,12 +912,10 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
             });
         }
 
-        let maximum_raw_size = mapped_size.checked_next_multiple_of(file_alignment).ok_or_else(||
-        {
+        let maximum_raw_size = mapped_size.checked_next_multiple_of(file_alignment).ok_or_else(|| {
             eprintln!("PE aligned section raw-data limit overflowed");
 
-            PeValidationError::InvalidSectionRawLayout
-            {
+            PeValidationError::InvalidSectionRawLayout {
                 index,
                 raw_size: section.SizeOfRawData as usize,
                 raw_pointer: section.PointerToRawData as usize,
@@ -950,20 +924,13 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
         })?;
         let raw_size = section.SizeOfRawData as usize;
         let raw_pointer = section.PointerToRawData as usize;
-        let raw_layout_invalid = if raw_size == 0
-        {
-            raw_pointer != 0
-        }
-        else
-        {
-            raw_size > maximum_raw_size || raw_pointer < size_of_headers || raw_pointer % file_alignment != 0 || raw_size % file_alignment != 0 || (section_alignment < IMAGE_PAGE_SIZE && raw_pointer != section_rva)
-        };
+        let raw_layout_invalid = if raw_size == 0 { raw_pointer != 0 } else { raw_size > maximum_raw_size || raw_pointer < size_of_headers || raw_pointer % file_alignment != 0 || raw_size % file_alignment != 0 || (section_alignment < IMAGE_PAGE_SIZE && raw_pointer != section_rva) };
 
         if raw_layout_invalid
         {
             eprintln!("PE section raw-data metadata is invalid");
-            return Err(PeValidationError::InvalidSectionRawLayout
-            {
+
+            return Err(PeValidationError::InvalidSectionRawLayout {
                 index,
                 raw_size,
                 raw_pointer,
@@ -973,11 +940,9 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
 
         if raw_size != 0
         {
-            let raw_end = raw_pointer.checked_add(raw_size).ok_or_else(||
-            {
+            let raw_end = raw_pointer.checked_add(raw_size).ok_or_else(|| {
                 eprintln!("PE section raw-data range overflowed");
-                PeValidationError::InvalidSectionRawLayout
-                {
+                PeValidationError::InvalidSectionRawLayout {
                     index,
                     raw_size,
                     raw_pointer,
@@ -988,8 +953,7 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
             if previous_raw_end.is_some_and(|end| raw_pointer < end)
             {
                 eprintln!("PE section raw-data ranges overlap or are out of order");
-                return Err(PeValidationError::InvalidSectionRawLayout
-                {
+                return Err(PeValidationError::InvalidSectionRawLayout {
                     index,
                     raw_size,
                     raw_pointer,
@@ -1011,8 +975,7 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
             _ =>
             {
                 eprintln!("PE mapped section extends beyond SizeOfImage");
-                return Err(PeValidationError::InvalidSectionRange
-                {
+                return Err(PeValidationError::InvalidSectionRange {
                     index,
                     section_rva,
                     mapped_size,
@@ -1027,11 +990,9 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
         }
 
         previous_end_rva = Some(end_rva);
-        expected_section_rva = end_rva.checked_next_multiple_of(section_alignment).ok_or_else(||
-        {
+        expected_section_rva = end_rva.checked_next_multiple_of(section_alignment).ok_or_else(|| {
             eprintln!("PE aligned section end overflowed");
-            PeValidationError::InvalidSectionRange
-            {
+            PeValidationError::InvalidSectionRange {
                 index,
                 section_rva,
                 mapped_size,
@@ -1043,8 +1004,7 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
     if !entry_point_is_executable
     {
         eprintln!("PE entry point is not contained by an executable section");
-        return Err(PeValidationError::InvalidEntryPoint
-        {
+        return Err(PeValidationError::InvalidEntryPoint {
             entry_point_rva,
             image_size,
         });
@@ -1055,8 +1015,7 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
     if base_of_code_rva != expected_base_of_code_rva
     {
         eprintln!("PE BaseOfCode does not identify the first code section");
-        return Err(PeValidationError::InvalidBaseOfCode
-        {
+        return Err(PeValidationError::InvalidBaseOfCode {
             base_of_code_rva,
             expected_base_of_code_rva,
         });
@@ -1065,8 +1024,7 @@ fn validate_section_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SE
     if expected_section_rva != image_size
     {
         eprintln!("PE SizeOfImage does not equal the aligned end of the final section");
-        return Err(PeValidationError::InvalidFinalImageSize
-        {
+        return Err(PeValidationError::InvalidFinalImageSize {
             expected_image_size: expected_section_rva,
             actual_image_size: image_size,
         });
@@ -1093,20 +1051,12 @@ fn validate_data_directory_layout(nt_headers: &IMAGE_NT_HEADERS64, sections: &[I
             continue;
         }
 
-        let required_size = if index == IMAGE_DIRECTORY_ENTRY_GLOBALPTR as usize
-        {
-            1
-        }
-        else
-        {
-            size
-        };
+        let required_size = if index == IMAGE_DIRECTORY_ENTRY_GLOBALPTR as usize { 1 } else { size };
 
         if !is_image_data_range(nt_headers, sections, virtual_address, required_size)
         {
             eprintln!("PE data directory points into image-alignment padding");
-            return Err(PeValidationError::InvalidDataDirectoryRange
-            {
+            return Err(PeValidationError::InvalidDataDirectoryRange {
                 index,
                 virtual_address,
                 size,
@@ -1193,18 +1143,15 @@ fn validate_dos_header(dos_header: &IMAGE_DOS_HEADER) -> Result<usize, PeValidat
     if dos_header.e_magic != IMAGE_DOS_SIGNATURE
     {
         eprintln!("PE DOS signature is invalid");
-        return Err(PeValidationError::InvalidDosSignature
-        {
+        return Err(PeValidationError::InvalidDosSignature {
             signature: dos_header.e_magic,
         });
     }
 
-    let nt_headers_offset = usize::try_from(dos_header.e_lfanew).map_err(|_|
-    {
+    let nt_headers_offset = usize::try_from(dos_header.e_lfanew).map_err(|_| {
         eprintln!("PE NT-header offset is negative");
 
-        PeValidationError::InvalidNtHeadersOffset
-        {
+        PeValidationError::InvalidNtHeadersOffset {
             offset: dos_header.e_lfanew,
         }
     })?;
@@ -1212,8 +1159,8 @@ fn validate_dos_header(dos_header: &IMAGE_DOS_HEADER) -> Result<usize, PeValidat
     if nt_headers_offset < size_of::<IMAGE_DOS_HEADER>() || nt_headers_offset % PE_HEADER_ALIGNMENT != 0
     {
         eprintln!("PE NT-header offset is outside the aligned DOS-stub range");
-        return Err(PeValidationError::InvalidNtHeadersOffset
-        {
+
+        return Err(PeValidationError::InvalidNtHeadersOffset {
             offset: dos_header.e_lfanew,
         });
     }
@@ -1236,8 +1183,8 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
     if nt_headers.FileHeader.Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE == 0
     {
         eprintln!("PE COFF header does not identify an executable image");
-        return Err(PeValidationError::MissingExecutableImageCharacteristic
-        {
+
+        return Err(PeValidationError::MissingExecutableImageCharacteristic {
             characteristics: nt_headers.FileHeader.Characteristics,
         });
     }
@@ -1245,8 +1192,8 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
     if nt_headers.OptionalHeader.Win32VersionValue != 0 || nt_headers.OptionalHeader.LoaderFlags != 0
     {
         eprintln!("PE optional header contains nonzero reserved fields");
-        return Err(PeValidationError::NonZeroReservedOptionalHeaderFields
-        {
+
+        return Err(PeValidationError::NonZeroReservedOptionalHeaderFields {
             win32_version_value: nt_headers.OptionalHeader.Win32VersionValue,
             loader_flags: nt_headers.OptionalHeader.LoaderFlags,
         });
@@ -1255,8 +1202,8 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
     if !section_alignment.is_power_of_two() || !file_alignment.is_power_of_two() || section_alignment < file_alignment || (section_alignment < IMAGE_PAGE_SIZE && section_alignment != file_alignment) || (section_alignment >= IMAGE_PAGE_SIZE && !(MIN_FILE_ALIGNMENT..=MAX_FILE_ALIGNMENT).contains(&file_alignment)) || image_size % section_alignment != 0
     {
         eprintln!("PE image or file alignment is invalid");
-        return Err(PeValidationError::InvalidImageAlignment
-        {
+
+        return Err(PeValidationError::InvalidImageAlignment {
             section_alignment,
             file_alignment,
         });
@@ -1265,8 +1212,7 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
     if size_of_headers % file_alignment != 0
     {
         eprintln!("PE SizeOfHeaders is not file aligned");
-        return Err(PeValidationError::InvalidHeadersSize
-        {
+        return Err(PeValidationError::InvalidHeadersSize {
             size_of_headers,
             image_size,
         });
@@ -1277,8 +1223,7 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
     if image_base % IMAGE_BASE_ALIGNMENT != 0
     {
         eprintln!("PE preferred image base is not 64-KiB aligned");
-        return Err(PeValidationError::InvalidImageBase
-        {
+        return Err(PeValidationError::InvalidImageBase {
             image_base,
         });
     }
@@ -1286,8 +1231,7 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
     if image_size > MAXIMUM_IMAGE_SIZE
     {
         eprintln!("PE32+ SizeOfImage exceeds the 2-GiB format limit");
-        return Err(PeValidationError::ImageSizeExceedsMaximum
-        {
+        return Err(PeValidationError::ImageSizeExceedsMaximum {
             image_size,
             maximum_image_size: MAXIMUM_IMAGE_SIZE,
         });
@@ -1303,8 +1247,7 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
             if virtual_address != 0 || size != 0
             {
                 eprintln!("PE reserved data directory is not zero");
-                return Err(PeValidationError::InvalidDataDirectoryRange
-                {
+                return Err(PeValidationError::InvalidDataDirectoryRange {
                     index,
                     virtual_address,
                     size,
@@ -1320,8 +1263,7 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
             if size != 0 || virtual_address >= image_size && virtual_address != 0
             {
                 eprintln!("PE global-pointer directory has an invalid RVA or nonzero size");
-                return Err(PeValidationError::InvalidDataDirectoryRange
-                {
+                return Err(PeValidationError::InvalidDataDirectoryRange {
                     index,
                     virtual_address,
                     size,
@@ -1340,8 +1282,7 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
         if virtual_address == 0 || size == 0
         {
             eprintln!("PE data directory has an incomplete range");
-            return Err(PeValidationError::InvalidDataDirectoryRange
-            {
+            return Err(PeValidationError::InvalidDataDirectoryRange {
                 index,
                 virtual_address,
                 size,
@@ -1354,8 +1295,7 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
             if virtual_address % PE_HEADER_ALIGNMENT != 0 || directory.VirtualAddress.checked_add(directory.Size).is_none()
             {
                 eprintln!("PE certificate-table file range is misaligned or overflowing");
-                return Err(PeValidationError::InvalidDataDirectoryRange
-                {
+                return Err(PeValidationError::InvalidDataDirectoryRange {
                     index,
                     virtual_address,
                     size,
@@ -1369,8 +1309,7 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
         if virtual_address.checked_add(size).is_none_or(|end| end > image_size)
         {
             eprintln!("PE data directory extends beyond SizeOfImage");
-            return Err(PeValidationError::InvalidDataDirectoryRange
-            {
+            return Err(PeValidationError::InvalidDataDirectoryRange {
                 index,
                 virtual_address,
                 size,
@@ -1385,15 +1324,13 @@ fn validate_nt_headers(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize
     if entry_point_rva >= image_size && entry_point_rva != 0
     {
         eprintln!("PE entry point extends beyond SizeOfImage");
-        return Err(PeValidationError::InvalidEntryPoint
-        {
+        return Err(PeValidationError::InvalidEntryPoint {
             entry_point_rva,
             image_size,
         });
     }
 
-    Ok(ValidatedNtHeaders
-    {
+    Ok(ValidatedNtHeaders {
         section_table_offset,
         section_table_size,
         image_size,
@@ -1410,8 +1347,7 @@ fn validate_header_fields(nt_headers: &IMAGE_NT_HEADERS64) -> Result<(usize, usi
     if nt_headers.Signature != IMAGE_NT_SIGNATURE
     {
         eprintln!("PE NT signature is invalid");
-        return Err(PeValidationError::InvalidNtSignature
-        {
+        return Err(PeValidationError::InvalidNtSignature {
             signature: nt_headers.Signature,
         });
     }
@@ -1419,14 +1355,12 @@ fn validate_header_fields(nt_headers: &IMAGE_NT_HEADERS64) -> Result<(usize, usi
     if nt_headers.FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64
     {
         eprintln!("PE machine type is not x86-64");
-        return Err(PeValidationError::UnsupportedMachine
-        {
+        return Err(PeValidationError::UnsupportedMachine {
             machine: nt_headers.FileHeader.Machine,
         });
     }
 
-    let required_optional_header_size = std::mem::offset_of!(IMAGE_OPTIONAL_HEADER64, NumberOfRvaAndSizes).checked_add(size_of::<u32>()).ok_or_else(||
-    {
+    let required_optional_header_size = std::mem::offset_of!(IMAGE_OPTIONAL_HEADER64, NumberOfRvaAndSizes).checked_add(size_of::<u32>()).ok_or_else(|| {
         eprintln!("PE required optional-header size overflowed");
         PeValidationError::SectionTableRangeOverflow
     })?;
@@ -1434,8 +1368,7 @@ fn validate_header_fields(nt_headers: &IMAGE_NT_HEADERS64) -> Result<(usize, usi
     if (nt_headers.FileHeader.SizeOfOptionalHeader as usize) < required_optional_header_size
     {
         eprintln!("PE optional header is too small for its required fields");
-        return Err(PeValidationError::InvalidOptionalHeaderSize
-        {
+        return Err(PeValidationError::InvalidOptionalHeaderSize {
             size: nt_headers.FileHeader.SizeOfOptionalHeader,
         });
     }
@@ -1443,8 +1376,7 @@ fn validate_header_fields(nt_headers: &IMAGE_NT_HEADERS64) -> Result<(usize, usi
     if nt_headers.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC
     {
         eprintln!("PE optional-header magic is not PE32+");
-        return Err(PeValidationError::UnsupportedOptionalHeaderMagic
-        {
+        return Err(PeValidationError::UnsupportedOptionalHeaderMagic {
             magic: nt_headers.OptionalHeader.Magic,
         });
     }
@@ -1457,8 +1389,7 @@ fn validate_header_fields(nt_headers: &IMAGE_NT_HEADERS64) -> Result<(usize, usi
     if declared_directory_count > available_directory_count
     {
         eprintln!("PE declares more data directories than its optional header contains");
-        return Err(PeValidationError::InvalidDataDirectoryCount
-        {
+        return Err(PeValidationError::InvalidDataDirectoryCount {
             declared_count: declared_directory_count,
             available_count: available_directory_count,
         });
@@ -1469,8 +1400,7 @@ fn validate_header_fields(nt_headers: &IMAGE_NT_HEADERS64) -> Result<(usize, usi
     if section_count == 0 || section_count > WINDOWS_IMAGE_SECTION_LIMIT
     {
         eprintln!("PE section count is outside the Windows loader limit");
-        return Err(PeValidationError::InvalidSectionCount
-        {
+        return Err(PeValidationError::InvalidSectionCount {
             count: nt_headers.FileHeader.NumberOfSections,
         });
     }
@@ -1488,8 +1418,7 @@ fn validate_header_fields(nt_headers: &IMAGE_NT_HEADERS64) -> Result<(usize, usi
     if size_of_headers == 0 || size_of_headers > image_size
     {
         eprintln!("PE SizeOfHeaders is zero or exceeds SizeOfImage");
-        return Err(PeValidationError::InvalidHeadersSize
-        {
+        return Err(PeValidationError::InvalidHeadersSize {
             size_of_headers,
             image_size,
         });
@@ -1508,18 +1437,15 @@ fn validate_header_fields(nt_headers: &IMAGE_NT_HEADERS64) -> Result<(usize, usi
 /// Returns the table offset, byte size, and exclusive end.
 fn get_section_table_range(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: usize, section_count: usize, size_of_headers: usize) -> Result<(usize, usize, usize), PeValidationError>
 {
-    let section_table_offset = nt_headers_offset.checked_add(std::mem::offset_of!(IMAGE_NT_HEADERS64, OptionalHeader)).and_then(|value| value.checked_add(nt_headers.FileHeader.SizeOfOptionalHeader as usize)).ok_or_else(||
-    {
+    let section_table_offset = nt_headers_offset.checked_add(std::mem::offset_of!(IMAGE_NT_HEADERS64, OptionalHeader)).and_then(|value| value.checked_add(nt_headers.FileHeader.SizeOfOptionalHeader as usize)).ok_or_else(|| {
         eprintln!("PE section-table offset overflowed");
         PeValidationError::SectionTableRangeOverflow
     })?;
-    let section_table_size = section_count.checked_mul(size_of::<IMAGE_SECTION_HEADER>()).ok_or_else(||
-    {
+    let section_table_size = section_count.checked_mul(size_of::<IMAGE_SECTION_HEADER>()).ok_or_else(|| {
         eprintln!("PE section-table size overflowed");
         PeValidationError::SectionTableRangeOverflow
     })?;
-    let section_table_end = section_table_offset.checked_add(section_table_size).ok_or_else(||
-    {
+    let section_table_end = section_table_offset.checked_add(section_table_size).ok_or_else(|| {
         eprintln!("PE section-table range overflowed");
         PeValidationError::SectionTableRangeOverflow
     })?;
@@ -1527,8 +1453,7 @@ fn get_section_table_range(nt_headers: &IMAGE_NT_HEADERS64, nt_headers_offset: u
     if section_table_end > size_of_headers
     {
         eprintln!("PE section table extends beyond SizeOfHeaders");
-        return Err(PeValidationError::SectionTableOutsideHeaders
-        {
+        return Err(PeValidationError::SectionTableOutsideHeaders {
             section_table_end,
             size_of_headers,
         });
@@ -1584,8 +1509,7 @@ fn read_nt_headers(bytes: &[u8], nt_headers_offset: usize) -> Result<IMAGE_NT_HE
         None =>
         {
             eprintln!("PE optional header exceeds the available bytes");
-            return Err(PeValidationError::DataTooSmall
-            {
+            return Err(PeValidationError::DataTooSmall {
                 offset: optional_header_offset,
                 bytes_requested: optional_header_size,
                 data_size: bytes.len(),
@@ -1616,8 +1540,7 @@ fn read_nt_headers(bytes: &[u8], nt_headers_offset: usize) -> Result<IMAGE_NT_HE
 /// Returns owned section headers parsed with unaligned reads.
 fn read_section_headers(bytes: &[u8], section_table_offset: usize, section_table_size: usize, section_count: usize) -> Result<Vec<IMAGE_SECTION_HEADER>, PeValidationError>
 {
-    let expected_table_size = section_count.checked_mul(size_of::<IMAGE_SECTION_HEADER>()).ok_or_else(||
-    {
+    let expected_table_size = section_count.checked_mul(size_of::<IMAGE_SECTION_HEADER>()).ok_or_else(|| {
         eprintln!("PE section count overflows the section-table size");
         PeValidationError::SectionTableRangeOverflow
     })?;
@@ -1625,15 +1548,13 @@ fn read_section_headers(bytes: &[u8], section_table_offset: usize, section_table
     if section_table_size != expected_table_size
     {
         eprintln!("PE section-table size does not match its section count");
-        return Err(PeValidationError::SectionTableSizeMismatch
-        {
+        return Err(PeValidationError::SectionTableSizeMismatch {
             expected_size: expected_table_size,
             actual_size: section_table_size,
         });
     }
 
-    let section_table_end = section_table_offset.checked_add(section_table_size).ok_or_else(||
-    {
+    let section_table_end = section_table_offset.checked_add(section_table_size).ok_or_else(|| {
         eprintln!("PE section-table byte range overflowed");
         PeValidationError::SectionTableRangeOverflow
     })?;
@@ -1641,8 +1562,7 @@ fn read_section_headers(bytes: &[u8], section_table_offset: usize, section_table
     if section_table_end > bytes.len()
     {
         eprintln!("PE section table extends beyond the available bytes");
-        return Err(PeValidationError::SectionTableOutsideData
-        {
+        return Err(PeValidationError::SectionTableOutsideData {
             section_table_end,
             data_size: bytes.len(),
         });
@@ -1650,12 +1570,10 @@ fn read_section_headers(bytes: &[u8], section_table_offset: usize, section_table
 
     let mut sections = Vec::new();
 
-    sections.try_reserve_exact(section_count).map_err(|_|
-    {
+    sections.try_reserve_exact(section_count).map_err(|_| {
         eprintln!("failed to allocate the PE section-header buffer");
 
-        PeValidationError::SectionBufferAllocationFailed
-        {
+        PeValidationError::SectionBufferAllocationFailed {
             section_count,
         }
     })?;
@@ -1683,22 +1601,18 @@ fn read_section_headers(bytes: &[u8], section_table_offset: usize, section_table
 unsafe fn read_data_value<T: Copy>(bytes: &[u8], offset: usize) -> Result<T, PeValidationError>
 {
     let bytes_requested = size_of::<T>();
-    let value_end = offset.checked_add(bytes_requested).ok_or_else(||
-    {
+    let value_end = offset.checked_add(bytes_requested).ok_or_else(|| {
         eprintln!("PE typed-read range overflowed");
 
-        PeValidationError::DataRangeOverflow
-        {
+        PeValidationError::DataRangeOverflow {
             offset,
             bytes_requested,
         }
     })?;
-    let value_bytes = bytes.get(offset..value_end).ok_or_else(||
-    {
+    let value_bytes = bytes.get(offset..value_end).ok_or_else(|| {
         eprintln!("PE typed read exceeds the available bytes");
 
-        PeValidationError::DataTooSmall
-        {
+        PeValidationError::DataTooSmall {
             offset,
             bytes_requested,
             data_size: bytes.len(),
@@ -1720,12 +1634,10 @@ unsafe fn read_data_value<T: Copy>(bytes: &[u8], offset: usize) -> Result<T, PeV
 unsafe fn read_remote_value<T: Copy>(process: HANDLE, address: usize, target: PeReadTarget) -> Result<T, PeValidationError>
 {
     // SAFETY: callers use only Windows PE structs composed of integer, byte-array, and raw-union fields.
-    unsafe { memutils::read_value(process, address) }.map_err(|error|
-    {
+    unsafe { memutils::read_value(process, address) }.map_err(|error| {
         eprintln!("failed to read a typed remote PE value");
 
-        PeValidationError::RemoteReadFailed
-        {
+        PeValidationError::RemoteReadFailed {
             target,
             address,
             error,
@@ -1742,12 +1654,10 @@ unsafe fn read_remote_value<T: Copy>(process: HANDLE, address: usize, target: Pe
 fn read_remote_nt_headers(process: HANDLE, nt_headers_address: usize) -> Result<IMAGE_NT_HEADERS64, PeValidationError>
 {
     let prefix_size = size_of::<u32>() + size_of::<IMAGE_FILE_HEADER>();
-    let prefix = memutils::read_exact(process, prefix_size, nt_headers_address).map_err(|error|
-    {
+    let prefix = memutils::read_exact(process, prefix_size, nt_headers_address).map_err(|error| {
         eprintln!("failed to read the remote PE signature and COFF header");
 
-        PeValidationError::RemoteReadFailed
-        {
+        PeValidationError::RemoteReadFailed {
             target: PeReadTarget::NtHeaders,
             address: nt_headers_address,
             error,
@@ -1765,12 +1675,10 @@ fn read_remote_nt_headers(process: HANDLE, nt_headers_address: usize) -> Result<
             return Err(PeValidationError::SectionTableRangeOverflow);
         }
     };
-    let header_bytes = memutils::read_exact(process, complete_size, nt_headers_address).map_err(|error|
-    {
+    let header_bytes = memutils::read_exact(process, complete_size, nt_headers_address).map_err(|error| {
         eprintln!("failed to read the declared remote PE optional header");
 
-        PeValidationError::RemoteReadFailed
-        {
+        PeValidationError::RemoteReadFailed {
             target: PeReadTarget::NtHeaders,
             address: nt_headers_address,
             error,
@@ -1790,22 +1698,18 @@ fn read_remote_nt_headers(process: HANDLE, nt_headers_address: usize) -> Result<
 /// Returns owned section headers only after one complete bounded remote read.
 fn read_remote_section_headers(process: HANDLE, image_base_address: usize, nt_headers: &IMAGE_NT_HEADERS64, validated_headers: &ValidatedNtHeaders) -> Result<Vec<IMAGE_SECTION_HEADER>, PeValidationError>
 {
-    let section_table_address = image_base_address.checked_add(validated_headers.section_table_offset).ok_or_else(||
-    {
+    let section_table_address = image_base_address.checked_add(validated_headers.section_table_offset).ok_or_else(|| {
         eprintln!("remote PE section-table address overflowed");
 
-        PeValidationError::SectionTableAddressOverflow
-        {
+        PeValidationError::SectionTableAddressOverflow {
             base_address: image_base_address,
             section_table_offset: validated_headers.section_table_offset,
         }
     })?;
-    let section_bytes = memutils::read_exact(process, validated_headers.section_table_size, section_table_address).map_err(|error|
-    {
+    let section_bytes = memutils::read_exact(process, validated_headers.section_table_size, section_table_address).map_err(|error| {
         eprintln!("failed to read the remote PE section table");
 
-        PeValidationError::RemoteReadFailed
-        {
+        PeValidationError::RemoteReadFailed {
             target: PeReadTarget::SectionTable,
             address: section_table_address,
             error,
@@ -1829,20 +1733,17 @@ fn create_pe_identity(nt_headers: &IMAGE_NT_HEADERS64, sections: &[IMAGE_SECTION
         None =>
         {
             eprintln!("PE identity buffer size overflowed");
-            return Err(PeValidationError::IdentityBufferAllocationFailed
-            {
+            return Err(PeValidationError::IdentityBufferAllocationFailed {
                 bytes_requested: usize::MAX,
             });
         }
     };
     let mut identity = Vec::new();
 
-    identity.try_reserve_exact(bytes_requested).map_err(|_|
-    {
+    identity.try_reserve_exact(bytes_requested).map_err(|_| {
         eprintln!("failed to allocate the exact PE identity buffer");
 
-        PeValidationError::IdentityBufferAllocationFailed
-        {
+        PeValidationError::IdentityBufferAllocationFailed {
             bytes_requested,
         }
     })?;
@@ -1918,17 +1819,15 @@ fn validate_process_image_mapping(process: HANDLE, image_base_address: usize, nt
 {
     let image_size = nt_headers.OptionalHeader.SizeOfImage as usize;
     let section_alignment = nt_headers.OptionalHeader.SectionAlignment as usize;
-    let image_end = image_base_address.checked_add(image_size).ok_or_else(||
-    {
+    let image_end = image_base_address.checked_add(image_size).ok_or_else(|| {
         eprintln!("remote PE mapping range overflowed");
 
-        PeValidationError::ImageRangeOverflow
-        {
+        PeValidationError::ImageRangeOverflow {
             base_address: image_base_address,
             image_size,
         }
     })?;
-    
+
     let mut address = image_base_address;
     let mut region_count = 0;
 
@@ -1937,8 +1836,7 @@ fn validate_process_image_mapping(process: HANDLE, image_base_address: usize, nt
         if region_count == MAXIMUM_IMAGE_REGION_COUNT
         {
             eprintln!("remote PE mapping exceeded the virtual-memory region limit");
-            return Err(PeValidationError::ImageRegionLimitExceeded
-            {
+            return Err(PeValidationError::ImageRegionLimitExceeded {
                 image_size,
                 maximum_region_count: MAXIMUM_IMAGE_REGION_COUNT,
             });
@@ -1946,22 +1844,18 @@ fn validate_process_image_mapping(process: HANDLE, image_base_address: usize, nt
 
         region_count += 1;
 
-        let region = memutils::query_region(process, address).map_err(|error|
-        {
+        let region = memutils::query_region(process, address).map_err(|error| {
             eprintln!("failed to query a remote PE mapping region");
 
-            PeValidationError::ImageRegionQueryFailed
-            {
+            PeValidationError::ImageRegionQueryFailed {
                 address,
                 error,
             }
         })?;
-        let region_end = region.base_address.checked_add(region.region_size).ok_or_else(||
-        {
+        let region_end = region.base_address.checked_add(region.region_size).ok_or_else(|| {
             eprintln!("remote PE mapping region range overflowed");
 
-            PeValidationError::ImageRegionRangeOverflow
-            {
+            PeValidationError::ImageRegionRangeOverflow {
                 base_address: region.base_address,
                 region_size: region.region_size,
             }
@@ -1970,8 +1864,7 @@ fn validate_process_image_mapping(process: HANDLE, image_base_address: usize, nt
         if region.base_address > address || region_end <= address
         {
             eprintln!("remote PE mapping region did not cover the requested address");
-            return Err(PeValidationError::ImageRegionDidNotAdvance
-            {
+            return Err(PeValidationError::ImageRegionDidNotAdvance {
                 address,
                 region_end,
             });
@@ -2003,8 +1896,7 @@ fn validate_image_region(region: &MemoryRegion, range_start: usize, range_end: u
     if range_start < image_base_address || range_end <= range_start || region.allocation_base != image_base_address
     {
         eprintln!("remote PE region has invalid bounds or belongs to a different allocation");
-        return Err(PeValidationError::InvalidImageRegion
-        {
+        return Err(PeValidationError::InvalidImageRegion {
             address: range_start,
             allocation_base: region.allocation_base,
             state: region.state,
@@ -2023,8 +1915,7 @@ fn validate_image_region(region: &MemoryRegion, range_start: usize, range_end: u
         }
 
         eprintln!("reserved remote PE range contains required image bytes");
-        return Err(PeValidationError::InvalidImageRegion
-        {
+        return Err(PeValidationError::InvalidImageRegion {
             address: range_start,
             allocation_base: region.allocation_base,
             state: region.state,
@@ -2035,8 +1926,7 @@ fn validate_image_region(region: &MemoryRegion, range_start: usize, range_end: u
     if region.state != MEM_COMMIT || region.region_type != MemoryRegionType::Image
     {
         eprintln!("remote PE region is not backed by committed image memory");
-        return Err(PeValidationError::InvalidImageRegion
-        {
+        return Err(PeValidationError::InvalidImageRegion {
             address: range_start,
             allocation_base: region.allocation_base,
             state: region.state,
@@ -2107,7 +1997,7 @@ fn classify_unavailable_image_range(range_start_rva: usize, range_end_rva: usize
                 return None;
             }
         };
-        
+
         let section_slot_end_rva = match mapped_end_rva.checked_next_multiple_of(section_alignment)
         {
             Some(value) => value,

@@ -1,12 +1,10 @@
-/// The encoding a string was stored in within a byte buffer.
-/// `Unknown` is reported when the leading bytes do not form a recognizable string.
+/// The supported encoding used for a decoded string within a byte buffer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StringEncoding
 {
     Ascii,
     Utf16Le,
     Utf8,
-    Unknown,
 }
 
 
