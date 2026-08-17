@@ -50,18 +50,14 @@ mod core
 
         pub(crate) mod utils
         {
-            pub(crate) mod detect_code_section_utils;
             pub(crate) mod foundation
             {
                 pub(crate) mod validate_pe;
             }
-            pub(crate) mod importutils;
+            pub(crate) mod imports;
             pub(crate) mod memutils;
             pub(crate) mod pdbutils;
-            pub(crate) mod pe_utils;
             pub(crate) mod processutils;
-            pub(crate) mod strings;
-            pub(crate) mod stringdumputils;
             pub(crate) mod tebutils;
         }
     }
@@ -73,11 +69,6 @@ mod core
 
     pub(crate) mod data
     {
-        pub(crate) mod opcode_specific64
-        {
-            pub(crate) mod opcodes64;
-        }
-
         pub(crate) mod patterns64
         {
             pub(crate) mod patterns64;

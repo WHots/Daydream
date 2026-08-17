@@ -6,11 +6,6 @@ edition = "2021"
 [dependencies]
 serde_json = "1.0"
 
-[dependencies.iced-x86]
-version = "1.21"
-default-features = false
-features = ["std", "decoder", "instr_info"]
-
 # Microsoft's official low-level Windows API bindings.
 # A version range (instead of a caret requirement) is recommended by the crate
 # authors to avoid duplicate versions in downstream graphs.

@@ -12,7 +12,7 @@ use crate::core::file_ops::utils::sections::{collect_file_sections, PeSectionInf
 use crate::core::file_ops::utils::strings::{collect_file_strings, FileString};
 use crate::core::file_ops::utils::validate::ValidatedPeFile;
 use crate::core::global_utils::fileutils::{get_file_entropy, get_file_sha256, write_json_file};
-use crate::core::process_ops::utils::strings::StringEncoding;
+use crate::core::file_ops::utils::strings::StringEncoding;
 
 /// Number of bytes represented by one binary megabyte in saved size fields.
 const BYTES_PER_MEGABYTE: f64 = 1024.0 * 1024.0;

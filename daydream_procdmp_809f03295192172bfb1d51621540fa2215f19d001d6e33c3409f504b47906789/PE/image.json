@@ -1,0 +1,34 @@
+{
+  "image": {
+    "base_address": 140698419593216,
+    "base_address_hex": "0x7FF6E7520000",
+    "end_address": 140698422550528,
+    "end_address_hex": "0x7FF6E77F2000",
+    "entry_point_address": 140698421561072,
+    "entry_point_address_hex": "0x7FF6E77006F0",
+    "entry_point_file_offset": 1964784,
+    "entry_point_file_offset_hex": "0x1DFAF0",
+    "entry_point_rva": 1967856,
+    "entry_point_rva_hex": "0x1E06F0",
+    "section_count": 5,
+    "size": 2957312,
+    "size_hex": "0x2D2000"
+  },
+  "process": {
+    "granted_access": 5136,
+    "granted_access_hex": "0x00001410",
+    "image_file_name": "daydream.exe",
+    "image_path": "C:\\Users\\willi\\Desktop\\Daydream\\target\\debug\\daydream.exe",
+    "process_id": 5784,
+    "process_id_hex": "0x1698",
+    "sha256": "809f03295192172bfb1d51621540fa2215f19d001d6e33c3409f504b47906789",
+    "sha256_source": "retained_disk_path_file_bytes"
+  },
+  "schema_version": 3,
+  "snapshot": {
+    "complete": true,
+    "unavailable_range_count": 0,
+    "unavailable_ranges": []
+  },
+  "status": "collected"
+}

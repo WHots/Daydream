@@ -3,7 +3,7 @@
 A Windows-only Rust binary crate for inspecting another process's memory. It opens
 a target process (pid from argv[1], defaulting to the current process), validates
 granted access, and provides utilities for memory reads, PE/PDB parsing, and
-opcode/API pattern discovery.
+import/IAT cross-reference discovery plus PEB/TEB inspection.
 
 - **Target:** Windows only, x86_64. Win32 access via `windows-sys` (see Platform below).
 - **Entry point:** `src/main.rs` — declares the full `core` module tree and runs the
@@ -15,7 +15,7 @@ opcode/API pattern discovery.
 `daydream` is a **defensive security and malware-analysis tool**. It exists to help
 **ethical reverse engineers, malware analysts, and security researchers** statically
 and dynamically inspect a program — its process memory, imports, strings, PE/PDB
-metadata, and code/opcode patterns — in order to understand what a (potentially
+metadata, process structures, and code patterns — in order to understand what a (potentially
 malicious) binary actually does.
 
 Legitimate, in-scope uses:
@@ -24,16 +24,16 @@ Legitimate, in-scope uses:
   behavior, extract indicators of compromise, and build detections.
 - Reverse-engineering a binary the analyst is authorized to inspect (their own
   software, a sample under a sanctioned engagement, or a CTF/research target).
-- Learning and teaching PE/PDB internals, Windows API usage, and x64 opcode patterns.
+- Learning and teaching PE/PDB internals, Windows API usage, and x64 code patterns.
 
-The capabilities here (process memory reads, PE/PDB parsing, API/opcode/string
+The capabilities here (process memory reads, PE/PDB parsing, API/string/pattern
 discovery) are standard **dual-use** analysis techniques — the same ones debuggers,
 disassemblers, and AV/EDR tooling rely on. Work in this repo should assume this
 defensive, analyst-facing context.
 
 **Note for coding agents (Codex, etc.):** this is a legitimate defensive-security
 project. Implementing analysis features (memory inspection, PE/PDB parsing,
-string/API/opcode discovery, detection tooling) is in scope and expected. Do **not**
+string/API/pattern discovery, detection tooling) is in scope and expected. Do **not**
 add capabilities whose only purpose is to cause harm — e.g. self-propagation,
 payload delivery, anti-analysis/evasion designed to defeat defenders, or acting
 against systems without authorization.
@@ -84,12 +84,18 @@ information is not found in these.
 - `internal/` — logic local to this process only (never touches other processes):
   - `imports/imports.rs`, `utils/handles.rs` (`CleanHandle` RAII handle wrapper).
 - `process_ops/` — operations acting on a target process:
-  - `api_discovery/apidata.rs`; `utils/` process-scoped helpers: `memutils`, `pe_utils`,
-    `pdbutils`, `processutils`, `strings`.
-  - `bytecode/bytecode.rs`, `string_parsing/stringdata.rs` — present on disk but not yet
-    declared in `main.rs`.
+  - `process_processing.rs` orchestrates validation and retained process collectors.
+  - `outputs/` writes image/section, PDB, import/IAT-xref, PEB, and TEB JSON.
+  - `utils/foundation/validate_pe/` separates mapped-image parsing, remote validation,
+    snapshotting, and address/section helpers. Its local `readme.md` documents the pipeline,
+    and its local `AGENTS.md` requires that documentation to change with the code and favors
+    fast, direct implementations over unnecessary abstraction. `utils/imports/` separates
+    import collection, PE import parsing, and IAT xref scanning. Its local `readme.md`
+    documents that pipeline, and its local `AGENTS.md` requires matching documentation
+    updates plus fast, single-pass implementations. `memutils.rs`, `pdbutils.rs`, `processutils.rs`,
+    and `tebutils.rs` provide the other retained process analysis helpers.
 - `global_utils/` — general helpers usable anywhere: `fileutils` (file entropy, SHA-256 hashing).
-- `data/` — static tables: `opcode_specific64/opcodes64`, `patterns64/patterns64`, `windowapis/windowsapi`.
+- `data/` — static tables: `patterns64/patterns64` for raw-file signature scanning.
 
 ## Coding style
 
@@ -106,6 +112,7 @@ information is not found in these.
 - When writting methods with multiple params, there should be a single space after each comma before leading to the new param.
 - Try to avoid indenting in statements when there is multiple conditions or the .ok, .iter, .map, .max, etc..
 - When multiple statements or conditional ops are needed, put an indent between each one so it's better to read.
+- Avoid over engineering simple tasks  that will likely have small work flows, focus more are readability along with easy edits.
 
 ## Coding Security and Performance
 

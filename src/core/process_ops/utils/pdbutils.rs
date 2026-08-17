@@ -5,7 +5,6 @@ use std::path::Path;
 use windows_sys::Win32::System::Diagnostics::Debug::{IMAGE_DEBUG_DIRECTORY, IMAGE_DEBUG_TYPE_CODEVIEW, IMAGE_DIRECTORY_ENTRY_DEBUG};
 
 use crate::core::process_ops::utils::foundation::validate_pe::{self, ValidatedPeSnapshot};
-use crate::core::process_ops::utils::pe_utils;
 
 /// Byte length of a CodeView record signature.
 const CODEVIEW_SIGNATURE_SIZE: usize = 4;
@@ -230,9 +229,9 @@ fn collect_pdb_info_from_pe(module_bytes: &[u8], pe: &validate_pe::PeImage, snap
             signature,
             age,
             debug_directory_rva: entry_rva,
-            debug_directory_file_offset: pe_utils::get_file_offset_from_pe(pe, entry_rva),
+            debug_directory_file_offset: validate_pe::get_file_offset_from_pe(pe, entry_rva),
             codeview_rva,
-            codeview_file_offset: pe_utils::get_file_offset_from_pe(pe, codeview_rva).or_else(|| {
+            codeview_file_offset: validate_pe::get_file_offset_from_pe(pe, codeview_rva).or_else(|| {
                 if entry.PointerToRawData == 0
                 {
                     None

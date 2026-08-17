@@ -41,7 +41,7 @@
 - [Build and test](#build-and-test)
 - [Usage](#usage)
 - [Output structure](#output-structure)
-- [Pattern and opcode catalogs](#pattern-and-opcode-catalogs)
+- [Raw-file signature catalog](#raw-file-signature-catalog)
 - [Extending and integrating](#extending-and-integrating)
 - [Project layout](#project-layout)
 - [Accuracy and limitations](#accuracy-and-limitations)
@@ -59,8 +59,7 @@ data from either:
 The project is designed to give malware analysts, reverse engineers, security
 researchers, students, and defenders a useful first-pass view before deeper analysis in
 a debugger or disassembler. It combines PE structure, imports, strings, debug metadata,
-process structures, pattern matches, opcode hits, and exact location metadata in one
-workflow.
+process structures, raw-file pattern matches, and exact location metadata in one workflow.
 
 Daydream is a triage tool. It is not intended to automatically declare that a file or
 process is malicious. Collected values should be treated as analyst evidence and
@@ -139,23 +138,18 @@ Process mode follows a stricter identity and snapshot sequence:
    information, locates and validates the PEB, reads `BeingDebugged` and the main-image
    base, validates the mapped x64 PE, and compares its base/size with the first Toolhelp
    module entry.
-3. Daydream tries to validate and hash the executable path reported by Toolhelp. This raw
-   image is an optional baseline; failure does not prevent ordinary mapped-image triage.
+3. Daydream tries to validate and hash the executable path reported by Toolhelp for a
+   stable output identity. Failure does not prevent mapped-image triage.
 4. `read_validated_image` creates one bounded, sparse-aware `ValidatedPeSnapshot`. Its PE
    identity must still match the earlier validation. Loader-discarded ranges that cannot
-   be read are retained as explicit unavailable ranges.
+   be read are retained as explicit unavailable ranges. The complete validation stages
+   and invariants are documented in
+   [`validate_pe/readme.md`](src/core/process_ops/utils/foundation/validate_pe/readme.md).
 5. `collect_validated_process_triage` passes the same validated process and snapshot
-   through PE-section collection, code-section scoring, signature scanning, opcode
-   decoding/baseline comparison, PDB parsing, imports/IAT xrefs, main-image strings, TEB
-   collection, and trusted stack-string scanning.
-6. `save_process_triage` writes process schema version 2 JSON. The progress display uses
+   through PE-section collection, PDB parsing, imports/IAT xref tracing, and TEB
+   collection.
+6. `save_process_triage` writes process schema version 4 JSON. The progress display uses
    one updating stderr line; detailed evidence goes to the output files.
-
-The disk baseline matters most to opcode classification. Daydream accepts it only after
-its validated PE headers and section table match the mapped image. Loader relocation
-ranges are also checked before changed mapped bytes are described as trap differences.
-If the baseline is missing, invalid, or identity-mismatched, the JSON reports that status
-and disables only the evidence that depends on a safe comparison.
 
 ### Locations and identity
 
@@ -181,8 +175,8 @@ raw PE, inability to create the mapped-image snapshot, or failure to save the fi
 output.
 
 Collector-local problems are retained where the collection model supports them. Missing
-PDB data, an unavailable import range, a thread that exits during enumeration, an
-untrusted TEB, or an unreadable stack region can therefore appear as typed status/error
+PDB data, an unavailable import range, or a thread that exits during enumeration can
+therefore appear as typed status/error
 data beside the successful results. A completed command means the orchestration and save
 succeeded; it does not imply that every target byte was readable.
 
@@ -194,7 +188,7 @@ succeeded; it does not imply that every target byte was readable.
 | Supported operating system | Windows only |
 | Supported architecture | x86-64 / PE32+ |
 | Rust toolchain | Stable `x86_64-pc-windows-msvc` |
-| Process output schema | Version 2 |
+| Process output schema | Version 4 |
 | Public API stability | Not guaranteed |
 | Primary interface | Command-line application |
 
@@ -230,22 +224,11 @@ Current process collectors include:
 - Process identity, executable path, handle access, and PEB validation.
 - Main-module base address, image size, entry-point RVA, and section table.
 - Sparse mapped-image reads with explicit unavailable-range tracking.
-- Evidence-based x64 code-section selection using PE structure, entry-point,
-  `BaseOfCode`, and runtime-function information.
-- Standard PE imports and direct RIP-relative IAT call/jump references.
+- Standard PE imports and direct RIP-relative IAT call/jump references. The
+  collection flow and supported encodings are documented in
+  [`imports/readme.md`](src/core/process_ops/utils/imports/readme.md).
 - CodeView PDB discovery for supported `RSDS` and `NB10` records.
-- ASCII, UTF-8, and UTF-16LE strings from the mapped main image.
 - Per-thread TEB collection with identity and PEB-pointer checks.
-- Region-by-region string scanning between trusted TEB `StackLimit` and `StackBase`
-  values.
-- Every configured x64 analyst signature from `patterns64.rs`.
-- Decoded breakpoint, debug-trap, and debug-register instructions at trusted x64
-  instruction boundaries.
-- Mapped software-trap differences identified by comparing process bytes with an
-  identity-matched disk baseline while excluding validated loader relocations.
-- Every raw opcode-byte occurrence with section, RVA, process address, and file-offset
-  metadata, plus aggregate counts and bounded heuristic samples of unchanged consecutive
-  `CC` padding candidates.
 - RVA, process address, section, and raw-file offset metadata where applicable.
 
 Process mode keeps the terminal quiet during normal collection. It displays one updating
@@ -301,7 +284,6 @@ The dependency set is intentionally small:
 | Dependency | Role in Daydream |
 | --- | --- |
 | `windows-sys` | Low-level Win32 types, constants, process/thread APIs, Toolhelp snapshots, memory information, file access, console behavior, and Windows cryptography |
-| `iced-x86` | x64 instruction decoding, instruction-boundary discovery, flow-control traversal, and semantic classification of breakpoint/debug-register instructions |
 | `serde_json` | Construction and pretty serialization of analyst-facing JSON artifacts |
 | Rust standard library | CLI parsing, paths/files, collections, checked arithmetic, owned buffers, and RAII |
 
@@ -403,29 +385,14 @@ Process roots use the target executable's file stem and SHA-256 identity:
 │   └── pdb.json
 ├── Imports/
 │   └── imports.json
-├── PEB/
-│   ├── peb.json
-│   └── tebs.json
-├── Patterns/
-│   ├── code_section.json
-│   ├── pattern_hits64.json
-│   └── opcode_hits64.json
-└── strings.json
+└── PEB/
+    ├── peb.json
+    └── tebs.json
 ```
 
-Key pattern outputs are:
-
-- `code_section.json` — selected code-section evidence and confidence.
-- `pattern_hits64.json` — the distinguished CRT entry signature and every configured
-  `X64_ANALYST_SIGNATURES` match across every available mapped executable section.
-- `opcode_hits64.json` — decoded static instructions and mapped trap-difference evidence,
-  every raw opcode occurrence, disk-baseline, relocation, and decode diagnostics,
-  aggregate raw byte-match counts, and bounded heuristic samples of unchanged `CC`
-  padding runs.
-
 Process JSON preserves typed failure or partial-read information instead of silently
-dismissing unavailable data. Reusing the same process output root updates the generated
-JSON files and removes obsolete legacy pattern filenames.
+dismissing unavailable data. Reusing the same process output root updates retained JSON
+and removes known outputs from the deleted pattern, opcode, and string collectors.
 
 ### Raw-file output
 
@@ -448,7 +415,7 @@ Raw-file roots use the target's file stem and SHA-256:
 The existing raw-file output root is recreated when the same target content is scanned
 again.
 
-## Pattern and opcode catalogs
+## Raw-file signature catalog
 
 ### Adding x64 analyst patterns
 
@@ -468,40 +435,13 @@ pub const EXAMPLE_SIGNATURE: Signature = x64_signature!(
 );
 ```
 
-Each wildcard consumes exactly one byte; it is not a variable-length gap. After declaring
-a signature, add it to the catalog matching its intended scope:
-
-- `X64_CRT_STARTUP_SIGNATURES`
-- `X64_FILE_SCAN_SIGNATURES`
-- `X64_ANALYST_SIGNATURES`
-
-Process pattern collection consumes `X64_ANALYST_SIGNATURES`. Raw-file scanning consumes
-`X64_FILE_SCAN_SIGNATURES`. Both scanners continue through the complete available range
-after a match, including overlapping occurrences; they do not stop after the first hit.
-
-### Adding x64 opcode records
-
-Breakpoint and debug-related opcode data lives in:
-
-```text
-src/core/data/opcode_specific64/opcodes64.rs
-```
-
-Each `OpcodeBytecode` provides a name, an exact opcode prefix, and a `requires_modrm`
-flag. Records included in `X64_BREAKPOINT_OPCODE_BYTECODES` contribute aggregate raw
-byte-match counts and one location record for every occurrence in `opcode_hits64.json`.
-Actionable hits are classified separately from decoded x64 instructions reached through
-trusted control flow in the identity-matched disk image. Neither raw nor semantic
-collection has a fixed hit-count retention cap; allocation failures are reported through
-the corresponding `*_truncated` JSON field while scanning continues.
-
-For opcodes such as `0F 21` and `0F 23`, decoded hits require supported debug-register
-operands. Their raw aggregate counters also require a trailing register-form ModR/M
-byte.
+Each wildcard consumes exactly one byte; it is not a variable-length gap. Add each
+signature to `X64_FILE_SCAN_SIGNATURES`. The raw-file scanner continues through every
+available executable-section byte after a match, including overlapping occurrences.
 
 ## Extending and integrating
 
-There are four common ways to plug new behavior into the current codebase.
+There are three common ways to plug new behavior into the current codebase.
 
 ### Add a raw-file collector
 
@@ -540,21 +480,16 @@ Process collectors should use only the access already requested unless a feature
 documented need for more. Expanding the process access mask changes the tool's security
 and compatibility profile and should be treated as an architectural change.
 
-### Add a signature or opcode
+### Add a raw-file signature
 
 Catalog-only additions do not require another orchestrator:
 
-- Add a wildcard-aware signature to `patterns64.rs` and include it in the appropriate
-  catalog slice. File and process modes consume different catalog slices as described in
-  [Pattern and opcode catalogs](#pattern-and-opcode-catalogs).
-- Add an exact opcode prefix to `opcodes64.rs` and include it in
-  `X64_BREAKPOINT_OPCODE_BYTECODES`. If semantic classification is required, also extend
-  the decoded-instruction rules in `process_ops/utils/pe_utils.rs`; adding raw bytes to
-  the catalog alone creates per-occurrence and aggregate raw byte evidence, not a new
-  trusted semantic claim.
+- Add a wildcard-aware signature to `patterns64.rs` and include it in
+  `X64_FILE_SCAN_SIGNATURES` as described in
+  [Raw-file signature catalog](#raw-file-signature-catalog).
 
-Every new detection should document what the bytes prove, likely false-positive
-conditions, and whether a hit is raw, decoded, or baseline-difference evidence.
+Every new detection should document what the raw bytes prove and likely false-positive
+conditions.
 
 ### Consume Daydream from another tool
 
@@ -588,8 +523,6 @@ src/
 ├── main.rs                         CLI parsing and mode dispatch
 └── core/
     ├── data/
-    │   ├── opcode_specific64/
-    │   │   └── opcodes64.rs        x64 breakpoint/debug opcode catalog
     │   └── patterns64/
     │       └── patterns64.rs       wildcard-aware x64 signature catalog
     ├── file_ops/
@@ -611,16 +544,25 @@ src/
     │   │   ├── config.rs           process dump layout and filenames
     │   │   └── process_triage_saves.rs
     │   └── utils/
-    │       ├── detect_code_section_utils.rs
     │       ├── foundation/
-    │       │   └── validate_pe.rs  mapped-image validation and snapshotting
-    │       ├── importutils.rs      process imports and IAT references
+    │       │   └── validate_pe/
+    │       │       ├── AGENTS.md    local maintenance and performance guidance
+    │       │       ├── readme.md    validation pipeline and invariants
+    │       │       ├── mod.rs       validation types and module interface
+    │       │       ├── locations.rs section metadata and RVA/file locations
+    │       │       ├── parsing.rs   mapped PE parsing and structural validation
+    │       │       ├── process.rs   remote image identity and mapping validation
+    │       │       └── snapshot.rs  bounded image copying and unavailable ranges
+    │       ├── imports/
+    │       │   ├── AGENTS.md       local maintenance and performance guidance
+    │       │   ├── readme.md       import parsing and IAT-xref pipeline
+    │       │   ├── mod.rs          import types and module interface
+    │       │   ├── collector.rs    import collection and result grouping
+    │       │   ├── parsing.rs      descriptors, thunks, names, and ordinals
+    │       │   └── xrefs.rs        direct IAT call and jump references
     │       ├── memutils.rs         memory reads and region queries
     │       ├── pdbutils.rs         process main-module PDB metadata
-    │       ├── pe_utils.rs         sections, locations, patterns, and opcodes
     │       ├── processutils.rs     process, PEB, and main-module validation
-    │       ├── stringdumputils.rs  main-image and TEB-stack strings
-    │       ├── strings.rs          shared string decoding primitives
     │       └── tebutils.rs         per-thread TEB collection
     ├── internal/
     │   ├── imports/imports.rs
@@ -631,32 +573,14 @@ src/
 
 ## Accuracy and limitations
 
-- Pattern hits and per-occurrence raw opcode matches prove only that matching bytes were
-  present. Raw matches can include instruction operands, embedded data, padding, or
-  unreachable bytes and are not actionable decoded hits.
-- Classified opcode hits begin at instruction boundaries decoded from an
-  identity-matched disk baseline. Recursive decoding is seeded by validated x64 runtime
-  functions and the image entry point, so unreachable code and leaf functions without
-  discoverable control flow may be omitted.
-- A mapped trap-difference hit proves that current process bytes contain a supported trap
-  encoding at a boundary shared by current and disk-baseline decoding, while the
-  identity-matched disk bytes differ there. It does not prove when or how that difference
-  arose, who made it, that a debugger is active, or that the instruction executed.
-- Disk identity matching compares validated PE headers and the section table; it does not
-  prove that the path still names the exact file object originally mapped by the loader.
-- Unchanged consecutive `CC` runs outside decoded control flow are reported only as
-  heuristic padding candidates. They may still be intentional traps or undiscovered
-  code.
-- Wildcard patterns are byte patterns, not decoded instruction semantics.
+- Raw-file wildcard pattern hits prove only that matching bytes are present; they are not
+  decoded instruction semantics or proof that the matched behavior executed.
 - File offsets may be unavailable for mapped bytes that do not correspond to raw-backed
   file data.
 - Process memory can change while collection is running. Threads may exit, stacks may
   change, and pages may become inaccessible.
 - Loader-discarded, guarded, reserved, protected, or unreadable ranges can produce partial
   results. Daydream records these conditions when its collector shape supports them.
-- Stack strings may be stale artifacts left behind after a function returns.
-- TEB stack scanning uses committed readable regions and skips guard or inaccessible
-  pages. Strings split across unreadable boundaries may not be recoverable.
 - Direct IAT xref collection currently focuses on supported x64 RIP-relative call and jump
   forms; it is not a complete disassembler or control-flow engine.
 - Daydream does not replace a debugger, disassembler, sandbox, YARA engine, EDR product,

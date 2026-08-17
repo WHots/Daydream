@@ -1,10 +1,8 @@
 //! Contributor-owned x64 byte-signature catalog.
 //!
 //! Add a signature by declaring one `Signature` constant with `x64_signature!`, using `??`,
-//! `?`, or `WILDCARD` for each arbitrary byte. Then add the constant to the catalog that owns
-//! its scan behavior: `X64_CRT_STARTUP_SIGNATURES` feeds process entry-signature scans and
-//! `X64_FILE_SCAN_SIGNATURES` feeds raw-file scans. Keep both scan catalogs synchronized
-//! with the signatures intended for their respective collectors.
+//! `?`, or `WILDCARD` for each arbitrary byte. Then add the constant to
+//! `X64_FILE_SCAN_SIGNATURES` so the raw-file scanner consumes it.
 
 /// A named x64 byte signature used to locate analyst-relevant code inside a PE image's
 /// executable section. Each element of `pattern` is `Some(byte)` for an exact
@@ -89,31 +87,6 @@ macro_rules! x64_signature
 }
 
 
-/// CRT entry thunk emitted by modern MSVC for `mainCRTStartup` (the console entry point);
-/// the GUI entry point `WinMainCRTStartup` uses an identically shaped thunk. The exact
-/// displacement bytes vary per build, so the relative offsets are wildcarded.
-///   48 83 EC 28          sub  rsp, 28h
-///   E8 ?? ?? ?? ??       call __security_init_cookie
-///   48 83 C4 28          add  rsp, 28h
-///   E9 ?? ?? ?? ??       jmp  __scrt_common_main_seh
-pub const MAIN_CRT_STARTUP: Signature = x64_signature!(
-    "mainCRTStartup",
-    [
-        0x48, 0x83, 0xEC, 0x28, 0xE8, ??, ??, ??, ??,
-        0x48, 0x83, 0xC4, 0x28, 0xE9, ??, ??, ??, ??,
-    ]
-);
-
-/// `__security_check_cookie` (x64): the stack-cookie validation thunk reached from the
-/// epilogue of nearly every `/GS`-protected function, making it a stable CRT anchor. The
-/// RIP-relative displacement to `__security_cookie` is wildcarded.
-///   48 3B 0D ?? ?? ?? ??  cmp rcx, cs:__security_cookie
-///   75 ??                 jne __report_gsfailure
-pub const SECURITY_CHECK_COOKIE: Signature = x64_signature!(
-    "__security_check_cookie",
-    [0x48, 0x3B, 0x0D, ??, ??, ??, ??, 0x75, ??]
-);
-
 /// Direct `PEB.BeingDebugged` lookup commonly emitted by binaries that avoid importing
 /// `IsDebuggerPresent`.
 ///   65 48 8B 04 25 60 00 00 00  mov rax, gs:[60h]
@@ -131,11 +104,6 @@ pub const NT_GLOBAL_FLAG_HEAP_DEBUG_CHECK: Signature = x64_signature!("PEB NtGlo
 /// The hit identifies code that queries debugger state, not the returned state itself.
 ///   0F B6 04 25 D4 02 FE 7F  movzx eax, byte ptr [7FFE02D4h]
 pub const KD_DEBUGGER_ENABLED_READ: Signature = x64_signature!("KUSER_SHARED_DATA KdDebuggerEnabled read", [0x0F, 0xB6, 0x04, 0x25, 0xD4, 0x02, 0xFE, 0x7F]);
-
-/// Loads the x64 Process Environment Block (PEB) through `gs:[60h]`. This is an anchor
-/// for API resolvers that walk the loader module list without using imports.
-///   65 48 8B 04 25 60 00 00 00  mov rax, gs:[60h]
-pub const PEB_RESOLVER_ANCHOR: Signature = x64_signature!("PEB resolver anchor", [0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00]);
 
 /// Walks from the x64 PEB through `PEB.Ldr` to the loader's in-memory module list.
 /// This contextual chain is stronger for raw-file triage than the PEB load alone.
@@ -201,16 +169,8 @@ pub const CPUID_LEAF_QUERY: Signature = x64_signature!(
 ///   CD 2D                 int 2dh
 pub const INT_2D_ANTI_DEBUG_CHECK: Signature = x64_signature!("INT 2D anti-debug check", [0x33, 0xC0, 0xCD, 0x2D]);
 
-/// CRT-only signatures for following an executable entry point toward `main` or `WinMain`.
-/// Runtime anchors intentionally stay out of this group because they do not identify user
-/// entry code.
-pub const X64_CRT_STARTUP_SIGNATURES: &[Signature] = &[MAIN_CRT_STARTUP];
-
 /// Behavior-bearing signatures intended for raw PE executable-section scans. A hit
 /// means the matching code exists in the stored image; it does not prove that a runtime
 /// check succeeded. Debugger state, debug-register values, and post-load breakpoint
 /// patches are process-only detections and intentionally do not belong in this group.
 pub const X64_FILE_SCAN_SIGNATURES: &[Signature] = &[PEB_BEING_DEBUGGED_CHECK, NT_GLOBAL_FLAG_HEAP_DEBUG_CHECK, KD_DEBUGGER_ENABLED_READ, PEB_LDR_IN_MEMORY_ORDER_WALK, DIRECT_SYSCALL_STUB, SHARED_USER_DATA_SYSCALL_GATE, RDTSC_TIMESTAMP_COMBINE, RDTSCP_TIMESTAMP_COMBINE, CPUID_LEAF_QUERY, INT_2D_ANTI_DEBUG_CHECK];
-
-/// All current x64 analysis signatures for callers that deliberately want every category.
-pub const X64_ANALYST_SIGNATURES: &[Signature] = &[MAIN_CRT_STARTUP, SECURITY_CHECK_COOKIE, PEB_BEING_DEBUGGED_CHECK, NT_GLOBAL_FLAG_HEAP_DEBUG_CHECK, KD_DEBUGGER_ENABLED_READ, PEB_RESOLVER_ANCHOR, PEB_LDR_IN_MEMORY_ORDER_WALK, DIRECT_SYSCALL_STUB, SHARED_USER_DATA_SYSCALL_GATE, RDTSC_TIMESTAMP_COMBINE, RDTSCP_TIMESTAMP_COMBINE, CPUID_LEAF_QUERY, INT_2D_ANTI_DEBUG_CHECK];

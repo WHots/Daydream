@@ -1,0 +1,12 @@
+{
+  "being_debugged": false,
+  "main_image_base_address": 140698328104960,
+  "main_image_base_address_hex": "0x7FF6E1DE0000",
+  "main_image_path": "C:\\Users\\willi\\Desktop\\Daydream\\target\\debug\\daydream.exe",
+  "peb_address": 167755317248,
+  "peb_address_hex": "0x270EFF0000",
+  "process_id": 34684,
+  "process_id_hex": "0x877C",
+  "schema_version": 4,
+  "status": "validated"
+}

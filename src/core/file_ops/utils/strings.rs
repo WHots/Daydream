@@ -1,5 +1,13 @@
 use crate::core::file_ops::utils::validate::ValidatedPeFile;
-use crate::core::process_ops::utils::strings::{self, StringEncoding};
+
+/// The supported encoding used for a decoded string within a byte buffer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StringEncoding
+{
+    Ascii,
+    Utf16Le,
+    Utf8,
+}
 
 /// Describes one decoded string found in a raw PE file.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,7 +74,7 @@ struct StringCandidate
 fn read_string_candidate(data: &[u8], offset: usize) -> Option<StringCandidate>
 {
     let region = data.get(offset..)?;
-    let utf16le_length = strings::utf16le_len(region);
+    let utf16le_length = utf16le_len(region);
 
     if utf16le_length > 0
     {
@@ -78,12 +86,12 @@ fn read_string_candidate(data: &[u8], offset: usize) -> Option<StringCandidate>
         });
     }
 
-    let ascii_length = strings::ascii_len(region);
+    let ascii_length = ascii_len(region);
     let possible_utf8 = region.get(ascii_length).is_some_and(|byte| !byte.is_ascii());
 
     if possible_utf8
     {
-        if let Some(value) = strings::read_utf8(data, offset)
+        if let Some(value) = read_utf8(data, offset)
         {
             if value.len() > ascii_length
             {
@@ -116,8 +124,8 @@ fn build_file_string(file: &ValidatedPeFile, file_offset: usize, candidate: Stri
 {
     let value = match candidate.encoding
     {
-        StringEncoding::Ascii => strings::read_ascii(&file.bytes, file_offset)?,
-        StringEncoding::Utf16Le => strings::read_utf16le(&file.bytes, file_offset)?,
+        StringEncoding::Ascii => read_ascii(&file.bytes, file_offset)?,
+        StringEncoding::Utf16Le => read_utf16le(&file.bytes, file_offset)?,
         StringEncoding::Utf8 => candidate.utf8_value?,
     };
 
@@ -174,4 +182,136 @@ fn file_offset_to_rva(file: &ValidatedPeFile, file_offset: usize) -> Option<usiz
     }
 
     None
+}
+
+
+/// Measures the leading run of printable ASCII characters in a buffer.
+/// `data`: the bytes to measure from the start.
+///
+/// Returns the length of the run in characters and bytes.
+fn ascii_len(data: &[u8]) -> usize
+{
+    let mut length = 0;
+
+    while length < data.len() && is_printable_ascii(data[length])
+    {
+        length += 1;
+    }
+
+    length
+}
+
+
+/// Measures the leading run of printable UTF-16LE characters in a buffer.
+/// `data`: the bytes to measure from the start.
+///
+/// Returns the length of the run in characters.
+fn utf16le_len(data: &[u8]) -> usize
+{
+    let mut length = 0;
+    let mut index = 0;
+
+    while index + 1 < data.len() && is_printable_ascii(data[index]) && data[index + 1] == 0
+    {
+        length += 1;
+        index += 2;
+    }
+
+    length
+}
+
+
+/// Decodes the printable ASCII string beginning at an exact byte offset.
+/// `data`: the bytes to decode from.
+/// `offset`: the starting byte position.
+///
+/// Returns an owned string when at least one printable ASCII character exists.
+fn read_ascii(data: &[u8], offset: usize) -> Option<String>
+{
+    let region = data.get(offset..)?;
+    let length = ascii_len(region);
+
+    if length == 0
+    {
+        return None;
+    }
+
+    Some(region[..length].iter().map(|&byte| byte as char).collect())
+}
+
+
+/// Decodes the printable UTF-16LE string beginning at an exact byte offset.
+/// `data`: the bytes to decode from.
+/// `offset`: the starting byte position.
+///
+/// Returns an owned string when at least one supported wide character exists.
+fn read_utf16le(data: &[u8], offset: usize) -> Option<String>
+{
+    let region = data.get(offset..)?;
+    let length = utf16le_len(region);
+
+    if length == 0
+    {
+        return None;
+    }
+
+    let mut value = String::with_capacity(length);
+    let mut index = 0;
+
+    while index < length * 2
+    {
+        value.push(region[index] as char);
+        index += 2;
+    }
+
+    Some(value)
+}
+
+
+/// Decodes the printable UTF-8 string beginning at an exact byte offset.
+/// `data`: the bytes to decode from.
+/// `offset`: the starting byte position.
+///
+/// Returns an owned string when at least one printable character exists.
+fn read_utf8(data: &[u8], offset: usize) -> Option<String>
+{
+    let region = data.get(offset..)?;
+    let run = utf8_run(region);
+
+    if run.is_empty()
+    {
+        return None;
+    }
+
+    Some(run.to_owned())
+}
+
+
+/// Reports whether one byte is a printable ASCII character, including space.
+/// `byte`: the byte to test.
+///
+/// Returns `true` for bytes in the inclusive range `0x20..=0x7E`.
+fn is_printable_ascii(byte: u8) -> bool
+{
+    byte.is_ascii_graphic() || byte == b' '
+}
+
+
+/// Returns the leading printable UTF-8 text in a buffer.
+/// `data`: bytes to decode from the start.
+///
+/// Returns the borrowed printable run, stopping at invalid or control bytes.
+fn utf8_run(data: &[u8]) -> &str
+{
+    let valid = match std::str::from_utf8(data)
+    {
+        Ok(text) => text,
+        Err(error) => std::str::from_utf8(&data[..error.valid_up_to()]).unwrap_or(""),
+    };
+
+    match valid.char_indices().find(|(_, character)| character.is_control())
+    {
+        Some((index, _)) => &valid[..index],
+        None => valid,
+    }
 }
