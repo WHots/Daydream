@@ -4,14 +4,15 @@ use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_BAD_LENGTH, HANDLE, INVALID_HANDLE_VALUE, NTSTATUS};
+use windows_sys::Win32::Foundation::{GetLastError, ERROR_BAD_LENGTH, HANDLE, INVALID_HANDLE_VALUE, NTSTATUS};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Module32FirstW, MODULEENTRY32W, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32};
 use windows_sys::Win32::System::Memory::{MEM_COMMIT, PAGE_GUARD, PAGE_NOACCESS};
 use windows_sys::Win32::System::Threading::GetProcessId;
 
+use crate::core::internal::handles::handles::{HandleGuard, HandleGuardError};
 use crate::core::internal::imports::imports::nt_query_information_process;
-use crate::core::process_ops::utils::foundation::validate_pe::{self, PeValidationError, ValidatedPeImage};
-use crate::core::process_ops::utils::memutils::{self, MemoryRegionQueryError, MemoryRegionType, ProcessMemoryReadError};
+use crate::core::process_ops::procedures::foundation::validate_pe::{self, PeValidationError, ValidatedPeImage};
+use crate::core::process_ops::utils::mem::{self, MemoryRegionQueryError, MemoryRegionType, ProcessMemoryReadError};
 
 /// Native `PROCESSINFOCLASS` value selecting `ProcessBasicInformation`.
 const PROCESS_BASIC_INFORMATION_CLASS: i32 = 0;
@@ -61,6 +62,7 @@ pub enum ProcessPeValidationError
     {
         error: u32,
     },
+    ModuleSnapshotHandleFailed(HandleGuardError),
     MainModuleEntryUnavailable
     {
         error: u32,
@@ -199,7 +201,7 @@ pub fn validate_process_peb(process: HANDLE) -> Result<ValidatedProcessPe, Proce
         peb_address,
         bytes_required: peb_bytes_required,
     })?;
-    let peb_region = memutils::query_region(process, peb_address).map_err(|error| ProcessPeValidationError::PebRegionQueryFailed {
+    let peb_region = mem::query_region(process, peb_address).map_err(|error| ProcessPeValidationError::PebRegionQueryFailed {
         peb_address,
         error,
     })?;
@@ -221,7 +223,7 @@ pub fn validate_process_peb(process: HANDLE) -> Result<ValidatedProcessPe, Proce
     }
 
     // SAFETY: `PebImageBaseBlock` contains only byte arrays and raw pointers, so every copied bit pattern is valid.
-    let peb = unsafe { memutils::read_value::<PebImageBaseBlock>(process, peb_address) }.map_err(ProcessPeValidationError::PebReadFailed)?;
+    let peb = unsafe { mem::read_value::<PebImageBaseBlock>(process, peb_address) }.map_err(ProcessPeValidationError::PebReadFailed)?;
     let image = validate_pe::validate_process_image(process, peb.reserved3[1] as usize).map_err(ProcessPeValidationError::PeValidationFailed)?;
     let toolhelp_image = query_toolhelp_main_image(process_id)?;
 
@@ -292,16 +294,18 @@ fn query_process_basic_information(process: HANDLE) -> Result<ProcessBasicInform
 /// Returns the first module base, size, and executable path after bounded retries.
 fn query_toolhelp_main_image(process_id: u32) -> Result<ToolhelpMainImage, ProcessPeValidationError>
 {
-    let mut snapshot = INVALID_HANDLE_VALUE;
+    let mut snapshot = None;
     let mut snapshot_error = 0u32;
 
     for _ in 0..TOOLHELP_SNAPSHOT_RETRY_LIMIT
     {
         // SAFETY: the snapshot flags and validated process identifier are passed by value.
-        snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, process_id) };
+        let raw_snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, process_id) };
 
-        if snapshot != INVALID_HANDLE_VALUE
+        if raw_snapshot != INVALID_HANDLE_VALUE
         {
+            // SAFETY: `CreateToolhelp32Snapshot` returned an owned handle closed by `CloseHandle`.
+            snapshot = Some(unsafe { HandleGuard::from_owned_raw(raw_snapshot, 0) }.map_err(ProcessPeValidationError::ModuleSnapshotHandleFailed)?);
             break;
         }
 
@@ -317,20 +321,24 @@ fn query_toolhelp_main_image(process_id: u32) -> Result<ToolhelpMainImage, Proce
         }
     }
 
-    if snapshot == INVALID_HANDLE_VALUE
+    let snapshot = match snapshot
     {
-        eprintln!("target process module snapshot retries were exhausted");
-        return Err(ProcessPeValidationError::ModuleSnapshotFailed {
-            error: snapshot_error,
-        });
-    }
+        Some(value) => value,
+        None =>
+        {
+            eprintln!("target process module snapshot retries were exhausted");
+            return Err(ProcessPeValidationError::ModuleSnapshotFailed {
+                error: snapshot_error,
+            });
+        }
+    };
 
     // SAFETY: all-zero bytes are a valid initial state before the required `dwSize` assignment.
     let mut entry: MODULEENTRY32W = unsafe { zeroed() };
     entry.dwSize = size_of::<MODULEENTRY32W>() as u32;
 
     // SAFETY: `snapshot` is valid, and `entry` is a writable buffer with its required size set.
-    let found = unsafe { Module32FirstW(snapshot, &mut entry) };
+    let found = unsafe { Module32FirstW(snapshot.as_raw(), &mut entry) };
     let entry_error = if found == 0
     {
         // SAFETY: `GetLastError` only reads the calling thread's last-error value.
@@ -341,8 +349,7 @@ fn query_toolhelp_main_image(process_id: u32) -> Result<ToolhelpMainImage, Proce
         0
     };
 
-    // SAFETY: `snapshot` is an owned valid handle no longer needed after the first-entry query.
-    unsafe { CloseHandle(snapshot) };
+    drop(snapshot);
 
     if found == 0
     {

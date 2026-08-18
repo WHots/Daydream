@@ -4,13 +4,14 @@ use serde_json::{json, Value};
 use windows_sys::Win32::System::Diagnostics::Debug::{IMAGE_SCN_CNT_CODE, IMAGE_SCN_MEM_EXECUTE, IMAGE_SCN_MEM_READ, IMAGE_SCN_MEM_WRITE};
 
 use crate::core::global_utils::fileutils::write_json_file;
+use crate::core::internal::handles::handles::HandleGuardError;
 use crate::core::process_ops::outputs::config::{prepare_process_dump_layout, ProcessDumpLayout, IMAGE_FILE_NAME, IMPORTS_FILE_NAME, PDB_FILE_NAME, PEB_FILE_NAME, PROCESS_TRIAGE_SCHEMA_VERSION, SECTIONS_FILE_NAME, TEBS_FILE_NAME};
 use crate::core::process_ops::process_processing::ProcessTriageCollection;
-use crate::core::process_ops::utils::foundation::validate_pe::UnavailablePeRange;
-use crate::core::process_ops::utils::imports::{PeIatXrefKind, ProcessImportCollectionError};
-use crate::core::process_ops::utils::memutils::ProcessMemoryReadError;
-use crate::core::process_ops::utils::pdbutils::{PdbCodeViewFormat, PdbInfoCollectionError};
-use crate::core::process_ops::utils::tebutils::{ProcessTebCollectionError, ThreadTebCollectionError, ThreadTebInfo};
+use crate::core::process_ops::procedures::foundation::validate_pe::UnavailablePeRange;
+use crate::core::process_ops::procedures::imports::{PeIatXrefKind, ProcessImportCollectionError};
+use crate::core::process_ops::utils::mem::ProcessMemoryReadError;
+use crate::core::process_ops::utils::pdb::{PdbCodeViewFormat, PdbInfoCollectionError};
+use crate::core::process_ops::utils::teb::{ProcessTebCollectionError, ThreadTebCollectionError, ThreadTebInfo};
 
 /// Saves every retained process-triage result into its configured JSON location.
 /// `collection`: the single validated process collection accumulated before persistence.
@@ -538,6 +539,12 @@ fn build_process_teb_error_json(error: &ProcessTebCollectionError) -> Value
         ProcessTebCollectionError::ThreadSnapshotFailed {
             error,
         } => win32_error_json("ProcessTebCollectionError", "thread_snapshot_failed", *error),
+        ProcessTebCollectionError::ThreadSnapshotHandleFailed(cause) => json!
+        ({
+            "type": "ProcessTebCollectionError",
+            "kind": "thread_snapshot_handle_failed",
+            "cause": build_handle_guard_error_json(cause)
+        }),
         ProcessTebCollectionError::ThreadSnapshotIterationFailed {
             error,
         } => win32_error_json("ProcessTebCollectionError", "thread_snapshot_iteration_failed", *error),
@@ -553,9 +560,12 @@ fn build_thread_teb_error_json(error: &ThreadTebCollectionError) -> Value
 {
     match error
     {
-        ThreadTebCollectionError::ThreadOpenFailed {
-            error,
-        } => win32_error_json("ThreadTebCollectionError", "thread_open_failed", *error),
+        ThreadTebCollectionError::ThreadOpenFailed(cause) => json!
+        ({
+            "type": "ThreadTebCollectionError",
+            "kind": "thread_open_failed",
+            "cause": build_handle_guard_error_json(cause)
+        }),
         ThreadTebCollectionError::ThreadInformationQueryFailed {
             status,
             return_length,
@@ -622,6 +632,74 @@ fn build_thread_teb_error_json(error: &ThreadTebCollectionError) -> Value
           {
                 "bytes_requested": bytes_requested,
                 "bytes_read": bytes_read
+            }
+        }),
+    }
+}
+
+
+/// Builds a stable structured owned-handle validation error.
+/// `error`: original handle open, query, or access failure.
+///
+/// Returns a typed JSON error retaining identifiers, access masks, and native status.
+fn build_handle_guard_error_json(error: &HandleGuardError) -> Value
+{
+    match error
+    {
+        HandleGuardError::InvalidHandle => simple_error_json("HandleGuardError", "invalid_handle"),
+        HandleGuardError::OpenProcessFailed {process_id, requested_access, error} => json!
+        ({
+            "type": "HandleGuardError",
+            "kind": "open_process_failed",
+            "fields":
+
+          {
+                "process_id": process_id,
+                "requested_access": requested_access,
+                "requested_access_hex": format!("0x{:08X}", requested_access),
+                "error": error,
+                "error_hex": format!("0x{:08X}", error)
+            }
+        }),
+        HandleGuardError::NtOpenThreadFailed {process_id, thread_id, requested_access, status} => json!
+        ({
+            "type": "HandleGuardError",
+            "kind": "nt_open_thread_failed",
+            "fields":
+
+          {
+                "process_id": process_id,
+                "thread_id": thread_id,
+                "requested_access": requested_access,
+                "requested_access_hex": format!("0x{:08X}", requested_access),
+                "status": status,
+                "status_hex": format!("0x{:08X}", *status as u32)
+            }
+        }),
+        HandleGuardError::AccessQueryFailed {status, return_length} => json!
+        ({
+            "type": "HandleGuardError",
+            "kind": "access_query_failed",
+            "fields":
+
+          {
+                "status": status,
+                "status_hex": format!("0x{:08X}", *status as u32),
+                "return_length": return_length,
+                "return_length_hex": format!("0x{:X}", return_length)
+            }
+        }),
+        HandleGuardError::InsufficientAccess {granted_access, required_access} => json!
+        ({
+            "type": "HandleGuardError",
+            "kind": "insufficient_access",
+            "fields":
+
+          {
+                "granted_access": granted_access,
+                "granted_access_hex": format!("0x{:08X}", granted_access),
+                "required_access": required_access,
+                "required_access_hex": format!("0x{:08X}", required_access)
             }
         }),
     }

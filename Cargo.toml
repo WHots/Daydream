@@ -9,10 +9,11 @@ serde_json = "1.0"
 # Microsoft's official low-level Windows API bindings.
 # A version range (instead of a caret requirement) is recommended by the crate
 # authors to avoid duplicate versions in downstream graphs.
-# Each Win32 area must be opted into explicitly via a feature flag.
+# Each Windows API area must be opted into explicitly via a feature flag.
 [dependencies.windows-sys]
 version = ">=0.59, <=0.61"
 features = [
+    "Wdk_Foundation",
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Threading",

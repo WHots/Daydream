@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::core::file_ops::utils::supports::{read_u16, read_u32, rva_to_file_range};
 use crate::core::file_ops::utils::validate::ValidatedPeFile;
-use crate::core::process_ops::utils::pdbutils::PdbGuid;
+use crate::core::process_ops::utils::pdb::PdbGuid;
 
 const PE_SIGNATURE_SIZE: usize = 4;
 const COFF_HEADER_SIZE: usize = 20;

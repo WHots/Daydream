@@ -5,7 +5,7 @@ use windows_sys::Win32::System::Diagnostics::Debug::{IMAGE_FILE_HEADER, IMAGE_NT
 use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE, PAGE_GUARD, PAGE_NOACCESS};
 use windows_sys::Win32::System::SystemServices::IMAGE_DOS_HEADER;
 
-use crate::core::process_ops::utils::memutils::{self, MemoryRegion, MemoryRegionType};
+use crate::core::process_ops::utils::mem::{self, MemoryRegion, MemoryRegionType};
 
 use super::locations::get_mapped_section_size;
 use super::parsing::{read_data_value, read_nt_headers, read_section_headers, validate_data_directory_layout, validate_dos_header, validate_nt_headers, validate_pe, validate_section_layout, ValidatedNtHeaders};
@@ -176,7 +176,7 @@ pub(super) fn validate_image_identity(expected: &ValidatedPeImage, actual: &Vali
 /// Returns the copied value or a stage-specific remote-read failure.
 unsafe fn read_remote_value<T: Copy>(process: HANDLE, address: usize, target: PeReadTarget) -> Result<T, PeValidationError>
 {
-    unsafe { memutils::read_value(process, address) }.map_err(|error| {
+    unsafe { mem::read_value(process, address) }.map_err(|error| {
 
         eprintln!("failed to read a typed remote PE value");
 
@@ -194,7 +194,7 @@ fn read_remote_nt_headers(process: HANDLE, nt_headers_address: usize) -> Result<
 {
     let prefix_size = size_of::<u32>() + size_of::<IMAGE_FILE_HEADER>();
 
-    let prefix = memutils::read_exact(process, prefix_size, nt_headers_address).map_err(|error| {
+    let prefix = mem::read_exact(process, prefix_size, nt_headers_address).map_err(|error| {
         
         eprintln!("failed to read the remote PE signature and COFF header");
 
@@ -216,7 +216,7 @@ fn read_remote_nt_headers(process: HANDLE, nt_headers_address: usize) -> Result<
             return Err(PeValidationError::SectionTableRangeOverflow);
         }
     };
-    let header_bytes = memutils::read_exact(process, complete_size, nt_headers_address).map_err(|error| {
+    let header_bytes = mem::read_exact(process, complete_size, nt_headers_address).map_err(|error| {
         
         eprintln!("failed to read the declared remote PE optional header");
 
@@ -249,7 +249,7 @@ fn read_remote_section_headers(process: HANDLE, image_base_address: usize, nt_he
             section_table_offset: validated_headers.section_table_offset,
         }
     })?;
-    let section_bytes = memutils::read_exact(process, validated_headers.section_table_size, section_table_address).map_err(|error| {
+    let section_bytes = mem::read_exact(process, validated_headers.section_table_size, section_table_address).map_err(|error| {
         eprintln!("failed to read the remote PE section table");
 
         PeValidationError::RemoteReadFailed {
@@ -386,7 +386,7 @@ fn validate_process_image_mapping(process: HANDLE, image_base_address: usize, nt
 
         region_count += 1;
 
-        let region = memutils::query_region(process, address).map_err(|error| {
+        let region = mem::query_region(process, address).map_err(|error| {
             eprintln!("failed to query a remote PE mapping region");
 
             PeValidationError::ImageRegionQueryFailed {address, error}

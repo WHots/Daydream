@@ -5,7 +5,7 @@ mod snapshot;
 
 use windows_sys::Win32::System::Diagnostics::Debug::{IMAGE_NT_HEADERS64, IMAGE_SECTION_HEADER};
 
-use crate::core::process_ops::utils::memutils::{MemoryRegionQueryError, MemoryRegionType, ProcessMemoryReadError};
+use crate::core::process_ops::utils::mem::{MemoryRegionQueryError, MemoryRegionType, ProcessMemoryReadError};
 
 pub(crate) use locations::{collect_sections_from_pe, get_data_directory, get_file_offset_from_pe, get_mapped_section_size};
 pub(crate) use process::validate_process_image;

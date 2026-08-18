@@ -4,7 +4,7 @@ use std::path::Path;
 
 use windows_sys::Win32::System::Diagnostics::Debug::{IMAGE_DEBUG_DIRECTORY, IMAGE_DEBUG_TYPE_CODEVIEW, IMAGE_DIRECTORY_ENTRY_DEBUG};
 
-use crate::core::process_ops::utils::foundation::validate_pe::{self, ValidatedPeSnapshot};
+use crate::core::process_ops::procedures::foundation::validate_pe::{self, ValidatedPeSnapshot};
 
 /// Byte length of a CodeView record signature.
 const CODEVIEW_SIGNATURE_SIZE: usize = 4;
@@ -126,10 +126,8 @@ fn collect_pdb_info_from_pe(module_bytes: &[u8], pe: &validate_pe::PeImage, snap
     if snapshot.is_some_and(|value| !validate_pe::is_snapshot_range_available(value, debug_directory_rva, debug_directory_size))
     {
         eprintln!("process PDB debug-directory bytes are unavailable");
-        return Err(validate_pe::UnavailablePeRange {
-            rva: debug_directory_rva,
-            size: debug_directory_size,
-        });
+
+        return Err(validate_pe::UnavailablePeRange {rva: debug_directory_rva, size: debug_directory_size});
     }
 
     let debug_directory_end = match debug_directory_rva.checked_add(debug_directory_size)

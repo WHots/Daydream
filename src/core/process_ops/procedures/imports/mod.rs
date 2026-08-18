@@ -2,7 +2,7 @@ mod collector;
 mod parsing;
 mod xrefs;
 
-use crate::core::process_ops::utils::foundation::validate_pe;
+use crate::core::process_ops::procedures::foundation::validate_pe;
 
 pub(crate) use collector::collect_process_imports_from_snapshot;
 

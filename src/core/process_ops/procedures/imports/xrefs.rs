@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use windows_sys::Win32::System::Diagnostics::Debug::IMAGE_SCN_MEM_EXECUTE;
 
-use crate::core::process_ops::utils::foundation::validate_pe;
+use crate::core::process_ops::procedures::foundation::validate_pe;
 
 use super::{PeIatXref, PeIatXrefKind};
 

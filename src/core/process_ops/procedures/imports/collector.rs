@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::core::process_ops::utils::foundation::validate_pe;
-use crate::core::process_ops::utils::processutils::ValidatedProcessPe;
+use crate::core::process_ops::procedures::foundation::validate_pe;
+use crate::core::process_ops::utils::process::ValidatedProcessPe;
 
 use super::{parsing, xrefs, PeIatXref, PeImportEntry, ProcessImportCollection, ProcessImportCollectionError, ProcessImportInfo, ProcessImportXref};
 

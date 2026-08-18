@@ -32,7 +32,7 @@ mod core
             pub(crate) mod imports;
         }
 
-        pub(crate) mod utils
+        pub(crate) mod handles
         {
             pub(crate) mod handles;
         }
@@ -48,17 +48,21 @@ mod core
 
         pub(crate) mod process_processing;
 
-        pub(crate) mod utils
+        pub(crate) mod procedures
         {
             pub(crate) mod foundation
             {
                 pub(crate) mod validate_pe;
             }
             pub(crate) mod imports;
-            pub(crate) mod memutils;
-            pub(crate) mod pdbutils;
-            pub(crate) mod processutils;
-            pub(crate) mod tebutils;
+        }
+
+        pub(crate) mod utils
+        {
+            pub(crate) mod mem;
+            pub(crate) mod pdb;
+            pub(crate) mod process;
+            pub(crate) mod teb;
         }
     }
 

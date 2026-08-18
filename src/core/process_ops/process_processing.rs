@@ -2,18 +2,18 @@ use std::fmt;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use windows_sys::Win32::Foundation::{GetLastError, HANDLE};
-use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+use windows_sys::Win32::Foundation::HANDLE;
+use windows_sys::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 
 use crate::core::file_ops::utils::validate as validate_file;
 use crate::core::global_utils::fileutils::get_data_sha256;
-use crate::core::internal::utils::handles::{CleanHandle, HandleAccessQueryError};
+use crate::core::internal::handles::handles::{HandleGuard, HandleGuardError};
 use crate::core::process_ops::outputs::process_triage_saves::save_process_triage;
-use crate::core::process_ops::utils::foundation::validate_pe::{self, PeSectionInfo, PeValidationError, UnavailablePeRange, ValidatedPeSnapshot};
-use crate::core::process_ops::utils::imports::{collect_process_imports_from_snapshot, ProcessImportCollection, ProcessImportCollectionError};
-use crate::core::process_ops::utils::pdbutils::{self, PdbInfo, PdbInfoCollectionError};
-use crate::core::process_ops::utils::processutils::{self, ProcessPeValidationError, ValidatedProcessPe};
-use crate::core::process_ops::utils::tebutils::{self, ProcessTebCollection, ProcessTebCollectionError};
+use crate::core::process_ops::procedures::foundation::validate_pe::{self, PeSectionInfo, PeValidationError, UnavailablePeRange, ValidatedPeSnapshot};
+use crate::core::process_ops::procedures::imports::{collect_process_imports_from_snapshot, ProcessImportCollection, ProcessImportCollectionError};
+use crate::core::process_ops::utils::pdb::{self, PdbInfo, PdbInfoCollectionError};
+use crate::core::process_ops::utils::process::{self, ProcessPeValidationError, ValidatedProcessPe};
+use crate::core::process_ops::utils::teb::{self, ProcessTebCollection, ProcessTebCollectionError};
 
 /// Access rights required by every retained process-memory collector.
 const PROCESS_MEMORY_INSPECTION_ACCESS: u32 = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ;
@@ -117,17 +117,7 @@ pub struct ProcessTriageCollection
 #[derive(Debug)]
 pub enum ProcessProcessingError
 {
-    OpenProcessFailed
-    {
-        process_id: u32,
-        error: u32,
-    },
-    AccessQueryFailed(HandleAccessQueryError),
-    InsufficientAccess
-    {
-        granted_access: u32,
-        required_access: u32,
-    },
+    HandleFailed(HandleGuardError),
     ProcessIdentityMismatch
     {
         expected_process_id: u32,
@@ -150,37 +140,12 @@ pub fn process_target(process_id: u32) -> Result<PathBuf, ProcessProcessingError
     let mut progress = ProcessProgress::new();
     progress.update("Opening process", 0);
 
-    // SAFETY: the process identifier and minimum required access mask are passed by value.
-    let raw_process = unsafe { OpenProcess(PROCESS_MEMORY_INSPECTION_ACCESS, 0, process_id) };
-    let process = match CleanHandle::new(raw_process)
-    {
-        Some(value) => value,
-        None =>
-        {
-            // SAFETY: `GetLastError` only reads the calling thread's last-error value.
-            let error = unsafe { GetLastError() };
-
-            return Err(ProcessProcessingError::OpenProcessFailed {
-                process_id,
-                error,
-            });
-        }
-    };
+    let process = HandleGuard::open_process(process_id, PROCESS_MEMORY_INSPECTION_ACCESS).map_err(ProcessProcessingError::HandleFailed)?;
     progress.update("Checking process access", 3);
-
-    let access = process.query_access().map_err(ProcessProcessingError::AccessQueryFailed)?;
-
-    if !access.contains(PROCESS_MEMORY_INSPECTION_ACCESS)
-    {
-        return Err(ProcessProcessingError::InsufficientAccess {
-            granted_access: access.granted_access(),
-            required_access: PROCESS_MEMORY_INSPECTION_ACCESS,
-        });
-    }
 
     progress.update("Validating process", 5);
 
-    let validated_process = processutils::validate_process_peb(process.as_raw()).map_err(ProcessProcessingError::ProcessValidationFailed)?;
+    let validated_process = process::validate_process_peb(process.as_raw()).map_err(ProcessProcessingError::ProcessValidationFailed)?;
 
     if validated_process.process_id != process_id
     {
@@ -218,7 +183,7 @@ pub fn process_target(process_id: u32) -> Result<PathBuf, ProcessProcessingError
         Some(value) => Box::<str>::from(value),
         None => get_data_sha256(&snapshot.bytes).map_err(ProcessProcessingError::OutputIdentityHashFailed)?.into_boxed_str(),
     };
-    let collection = collect_validated_process_triage(process.as_raw(), validated_process, snapshot, backing_file_sha256, output_identity_sha256, access.granted_access(), &mut progress);
+    let collection = collect_validated_process_triage(process.as_raw(), validated_process, snapshot, backing_file_sha256, output_identity_sha256, process.granted_access(), &mut progress);
 
     progress.update("Saving results", 98);
     let layout = save_process_triage(&collection).map_err(ProcessProcessingError::SaveFailed)?;
@@ -234,15 +199,7 @@ impl fmt::Display for ProcessProcessingError
     {
         match self
         {
-            Self::OpenProcessFailed {
-                process_id,
-                error,
-            } => write!(formatter, "failed to open process {}: {}", process_id, error),
-            Self::AccessQueryFailed(error) => write!(formatter, "failed to query process handle access: {:?}", error),
-            Self::InsufficientAccess {
-                granted_access,
-                required_access,
-            } => write!(formatter, "process handle access 0x{:08X} does not contain required access 0x{:08X}", granted_access, required_access),
+            Self::HandleFailed(error) => write!(formatter, "process handle validation failed: {}", error),
             Self::ProcessIdentityMismatch {
                 expected_process_id,
                 actual_process_id,
@@ -261,6 +218,7 @@ impl std::error::Error for ProcessProcessingError
     {
         match self
         {
+            Self::HandleFailed(error) => Some(error),
             Self::OutputIdentityHashFailed(error) => Some(error),
             Self::SaveFailed(error) => Some(error),
             _ => None,
@@ -288,7 +246,7 @@ fn collect_validated_process_triage(process: HANDLE, validated_process: Validate
 
     progress.update("Collecting PDB metadata", 20);
 
-    let pdb = pdbutils::collect_main_module_pdb_info_from_snapshot(&snapshot);
+    let pdb = pdb::collect_main_module_pdb_info_from_snapshot(&snapshot);
 
     progress.update("Scanning imports and IAT", 20);
 
@@ -298,7 +256,7 @@ fn collect_validated_process_triage(process: HANDLE, validated_process: Validate
 
     progress.update("Collecting thread TEBs", 85);
 
-    let tebs = tebutils::collect_process_tebs(process, &mut |completed, total| {
+    let tebs = teb::collect_process_tebs(process, &mut |completed, total| {
         progress.update("Collecting thread TEBs", phase_percentage(85, 97, completed, total));
     });
 

@@ -132,8 +132,8 @@ scan again removes and recreates that exact output root before writing the new r
 Process mode follows a stricter identity and snapshot sequence:
 
 1. `OpenProcess` requests only `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ`.
-   `CleanHandle` owns the handle and closes it on drop, while `NtQueryObject` confirms the
-   handle actually contains the requested access mask.
+   `HandleGuard` rejects invalid handles, uses Rust's `OwnedHandle` for automatic closing,
+   and confirms the granted access mask through `NtQueryObject` before returning.
 2. `validate_process_peb` cross-checks the process ID from the handle and native process
    information, locates and validates the PEB, reads `BeingDebugged` and the main-image
    base, validates the mapped x64 PE, and compares its base/size with the first Toolhelp
@@ -144,7 +144,7 @@ Process mode follows a stricter identity and snapshot sequence:
    identity must still match the earlier validation. Loader-discarded ranges that cannot
    be read are retained as explicit unavailable ranges. The complete validation stages
    and invariants are documented in
-   [`validate_pe/readme.md`](src/core/process_ops/utils/foundation/validate_pe/readme.md).
+   [`validate_pe/README.md`](src/core/process_ops/procedures/foundation/validate_pe/README.md).
 5. `collect_validated_process_triage` passes the same validated process and snapshot
    through PE-section collection, PDB parsing, imports/IAT xref tracing, and TEB
    collection.
@@ -226,7 +226,7 @@ Current process collectors include:
 - Sparse mapped-image reads with explicit unavailable-range tracking.
 - Standard PE imports and direct RIP-relative IAT call/jump references. The
   collection flow and supported encodings are documented in
-  [`imports/readme.md`](src/core/process_ops/utils/imports/readme.md).
+  [`imports/README.md`](src/core/process_ops/procedures/imports/README.md).
 - CodeView PDB discovery for supported `RSDS` and `NB10` records.
 - Per-thread TEB collection with identity and PEB-pointer checks.
 - RVA, process address, section, and raw-file offset metadata where applicable.
@@ -288,10 +288,11 @@ The dependency set is intentionally small:
 | Rust standard library | CLI parsing, paths/files, collections, checked arithmetic, owned buffers, and RAII |
 
 The small native declarations in `core/internal/imports/imports.rs` link directly to
-`ntdll` for `NtQueryObject`, `NtQueryInformationProcess`,
+`ntdll` for `NtOpenThread`, `NtQueryObject`, `NtQueryInformationProcess`,
 `NtQueryInformationThread`, `NtReadVirtualMemory`, and `NtQueryVirtualMemory`.
-`core/internal/utils/handles.rs` wraps owned Win32 handles so normal and error exits close
-them consistently.
+`core/internal/handles/handles.rs` opens process handles through `OpenProcess`, thread
+handles through `NtOpenThread`, validates granted access, and delegates automatic closing
+to Rust's standard `OwnedHandle`.
 
 ## Build and test
 
@@ -462,9 +463,9 @@ This path should never open, attach to, or execute the target.
 
 ### Add a process collector
 
-1. Put process-specific logic under `src/core/process_ops/utils/`. Prefer consuming
-   `&ValidatedProcessPe` and `&ValidatedPeSnapshot` so the target is not independently
-   revalidated or reread.
+1. Put process-specific workflows under `src/core/process_ops/procedures/` and shared
+   helpers under `src/core/process_ops/utils/`. Prefer consuming `&ValidatedProcessPe`
+   and `&ValidatedPeSnapshot` so the target is not independently revalidated or reread.
 2. Declare the module in `src/main.rs`.
 3. Add a field to `ProcessTriageCollection` and call the collector from
    `collect_validated_process_triage`. Keep expensive phases connected to the existing
@@ -560,13 +561,13 @@ src/
     │       │   ├── collector.rs    import collection and result grouping
     │       │   ├── parsing.rs      descriptors, thunks, names, and ordinals
     │       │   └── xrefs.rs        direct IAT call and jump references
-    │       ├── memutils.rs         memory reads and region queries
-    │       ├── pdbutils.rs         process main-module PDB metadata
-    │       ├── processutils.rs     process, PEB, and main-module validation
-    │       └── tebutils.rs         per-thread TEB collection
+    │       ├── mem.rs              memory reads and region queries
+    │       ├── pdb.rs              process main-module PDB metadata
+    │       ├── process.rs          process, PEB, and main-module validation
+    │       └── teb.rs              per-thread TEB collection
     ├── internal/
     │   ├── imports/imports.rs
-    │   └── utils/handles.rs        owned Win32 handle wrapper
+    │   └── handles/handles.rs      validated owned Win32 handle guard
     └── global_utils/
         └── fileutils.rs            SHA-256, entropy, and JSON writing
 ```

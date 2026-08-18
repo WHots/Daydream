@@ -1,9 +1,21 @@
 use core::ffi::c_void;
 
+use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Win32::Foundation::{HANDLE, NTSTATUS};
+use windows_sys::Win32::System::WindowsProgramming::CLIENT_ID;
 
 #[link(name = "ntdll")]
 unsafe extern "system" {
+    /// Opens a native thread object for one process/thread client identifier.
+    /// `thread_handle`: receives the owned thread handle on success.
+    /// `desired_access`: exact thread access mask requested by the caller.
+    /// `object_attributes`: initialized unnamed object attributes for the handle.
+    /// `client_id`: process and thread identifiers selecting the target thread.
+    ///
+    /// Returns the raw `NTSTATUS` reported by the native call.
+    #[link_name = "NtOpenThread"]
+    pub(crate) fn nt_open_thread(thread_handle: *mut HANDLE, desired_access: u32, object_attributes: *const OBJECT_ATTRIBUTES, client_id: *const CLIENT_ID) -> NTSTATUS;
+
     /// Queries metadata for a kernel object handle.
     /// `handle`: the handle whose object information is queried.
     /// `object_information_class`: the native object information class.

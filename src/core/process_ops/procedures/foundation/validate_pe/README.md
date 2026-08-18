@@ -45,7 +45,7 @@ ValidatedPeSnapshot
         +--> imports and IAT cross-references
 ```
 
-`processutils::validate_process_peb` obtains the candidate base address from the
+`process::validate_process_peb` obtains the candidate base address from the
 PEB and calls `validate_process_image`. Outside this directory, it also compares
 the validated base and image size with the first Toolhelp module entry.
 

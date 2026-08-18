@@ -3,11 +3,11 @@ use core::mem::{size_of, MaybeUninit};
 
 use windows_sys::Win32::Foundation::{GetLastError, ERROR_NO_MORE_FILES, HANDLE, INVALID_HANDLE_VALUE, NTSTATUS};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32};
-use windows_sys::Win32::System::Threading::{GetProcessId, OpenThread, THREAD_QUERY_INFORMATION};
+use windows_sys::Win32::System::Threading::{GetProcessId, THREAD_QUERY_INFORMATION};
 
+use crate::core::internal::handles::handles::{HandleGuard, HandleGuardError};
 use crate::core::internal::imports::imports::nt_query_information_thread;
-use crate::core::internal::utils::handles::CleanHandle;
-use crate::core::process_ops::utils::memutils::{self, ProcessMemoryReadError};
+use crate::core::process_ops::utils::mem::{self, ProcessMemoryReadError};
 
 /// Native `THREADINFOCLASS` value selecting `ThreadBasicInformation`.
 const THREAD_BASIC_INFORMATION_CLASS: i32 = 0;
@@ -77,6 +77,7 @@ pub enum ProcessTebCollectionError
     {
         error: u32,
     },
+    ThreadSnapshotHandleFailed(HandleGuardError),
     ThreadSnapshotIterationFailed
     {
         error: u32,
@@ -88,10 +89,7 @@ pub enum ProcessTebCollectionError
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ThreadTebCollectionError
 {
-    ThreadOpenFailed
-    {
-        error: u32,
-    },
+    ThreadOpenFailed(HandleGuardError),
     ThreadInformationQueryFailed
     {
         status: NTSTATUS,
@@ -235,20 +233,12 @@ fn enumerate_process_thread_ids(process_id: u32) -> Result<Vec<u32>, ProcessTebC
         });
     }
 
-    let snapshot = match CleanHandle::new(raw_snapshot)
-    {
-        Some(value) => value,
-        None =>
-        {
-            let error = unsafe { GetLastError() };
+    // SAFETY: `CreateToolhelp32Snapshot` returned an owned handle closed by `CloseHandle`.
+    let snapshot = unsafe { HandleGuard::from_owned_raw(raw_snapshot, 0) }.map_err(ProcessTebCollectionError::ThreadSnapshotHandleFailed)?;
 
-            return Err(ProcessTebCollectionError::ThreadSnapshotFailed {
-                error,
-            });
-        }
-    };
     let mut thread_ids = Vec::new();
     let mut entry = THREADENTRY32::default();
+
     entry.dwSize = size_of::<THREADENTRY32>() as u32;
 
     let found = unsafe { Thread32First(snapshot.as_raw(), &mut entry) };
@@ -309,19 +299,7 @@ fn enumerate_process_thread_ids(process_id: u32) -> Result<Vec<u32>, ProcessTebC
 /// Returns `Ok(ThreadTebInfo)` when the native thread information and TEB header are readable.
 fn collect_thread_teb_for_process(process: HANDLE, process_id: u32, thread_id: u32) -> Result<ThreadTebInfo, ThreadTebCollectionError>
 {
-    let raw_thread = unsafe { OpenThread(THREAD_QUERY_INFORMATION, 0, thread_id) };
-    let thread = match CleanHandle::new(raw_thread)
-    {
-        Some(value) => value,
-        None =>
-        {
-            let error = unsafe { GetLastError() };
-
-            return Err(ThreadTebCollectionError::ThreadOpenFailed {
-                error,
-            });
-        }
-    };
+    let thread = HandleGuard::open_thread(process_id, thread_id, THREAD_QUERY_INFORMATION).map_err(ThreadTebCollectionError::ThreadOpenFailed)?;
     let basic_information = query_thread_basic_information(thread.as_raw())?;
 
     if basic_information.client_id.unique_process != process_id as usize || basic_information.client_id.unique_thread != thread_id as usize
@@ -409,7 +387,7 @@ fn query_thread_basic_information(thread: HANDLE) -> Result<ThreadBasicInformati
 /// Returns the copied TEB header or a thread-scoped collection error.
 fn read_teb_header(process: HANDLE, teb_address: usize) -> Result<TebHeader64, ThreadTebCollectionError>
 {
-    let read = memutils::find_signature(process, TEB_HEADER64_SIZE, teb_address, &[]).map_err(ThreadTebCollectionError::TebReadFailed)?;
+    let read = mem::find_signature(process, TEB_HEADER64_SIZE, teb_address, &[]).map_err(ThreadTebCollectionError::TebReadFailed)?;
 
     if read.bytes.len() < TEB_HEADER64_SIZE
     {

@@ -86,10 +86,10 @@ information is not found in these.
 - `process_ops/` — operations acting on a target process:
   - `process_processing.rs` orchestrates validation and retained process collectors.
   - `outputs/` writes image/section, PDB, import/IAT-xref, PEB, and TEB JSON.
-  - `utils/foundation/validate_pe/` separates mapped-image parsing, remote validation,
+  - `procedures/foundation/validate_pe/` separates mapped-image parsing, remote validation,
     snapshotting, and address/section helpers. Its local `readme.md` documents the pipeline,
     and its local `AGENTS.md` requires that documentation to change with the code and favors
-    fast, direct implementations over unnecessary abstraction. `utils/imports/` separates
+    fast, direct implementations over unnecessary abstraction. `procedures/imports/` separates
     import collection, PE import parsing, and IAT xref scanning. Its local `readme.md`
     documents that pipeline, and its local `AGENTS.md` requires matching documentation
     updates plus fast, single-pass implementations. `memutils.rs`, `pdbutils.rs`, `processutils.rs`,

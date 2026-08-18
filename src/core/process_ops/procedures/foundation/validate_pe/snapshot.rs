@@ -1,7 +1,7 @@
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::System::Diagnostics::Debug::{IMAGE_NT_HEADERS64, IMAGE_SECTION_HEADER};
 
-use crate::core::process_ops::utils::memutils;
+use crate::core::process_ops::utils::mem;
 
 use super::locations::is_image_data_range;
 use super::process::{validate_image_identity, validate_image_region, validate_matching_image, validate_process_image_details, ImageRegionDisposition};
@@ -120,7 +120,7 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
 
         region_count += 1;
 
-        let region = memutils::query_region(process, address).map_err(|error| {
+        let region = mem::query_region(process, address).map_err(|error| {
             eprintln!("failed to query a remote PE snapshot region");
 
             PeValidationError::ImageRegionQueryFailed {
@@ -158,7 +158,7 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
                 while read_address < range_end
                 {
                     let bytes_requested = (range_end - read_address).min(IMAGE_SNAPSHOT_READ_CHUNK_SIZE);
-                    let region_bytes = memutils::read_exact(process, bytes_requested, read_address).map_err(|error| {
+                    let region_bytes = mem::read_exact(process, bytes_requested, read_address).map_err(|error| {
                         eprintln!("failed to read a committed remote PE snapshot region");
 
                         PeValidationError::RemoteReadFailed {
@@ -222,4 +222,3 @@ fn read_process_image_bytes(process: HANDLE, image_base_address: usize, nt_heade
 
     Ok((bytes, unavailable_ranges))
 }
-
