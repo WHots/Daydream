@@ -283,6 +283,7 @@ The dependency set is intentionally small:
 
 | Dependency | Role in Daydream |
 | --- | --- |
+| `ms-pdb` | Read-only parsing of explicitly supplied local PDB files and their DBI substreams |
 | `windows-sys` | Low-level Win32 types, constants, process/thread APIs, Toolhelp snapshots, memory information, file access, console behavior, and Windows cryptography |
 | `serde_json` | Construction and pretty serialization of analyst-facing JSON artifacts |
 | Rust standard library | CLI parsing, paths/files, collections, checked arithmetic, owned buffers, and RAII |
@@ -481,6 +482,10 @@ Process collectors should use only the access already requested unless a feature
 documented need for more. Expanding the process access mask changes the tool's security
 and compatibility profile and should be treated as an architectural change.
 
+PDB-content helpers belong under `procedures/debuginfo/`. The DBI source-path collector
+accepts an explicit local PDB path, preserves source-path order and duplicates, and does
+not automatically follow a PE-embedded path or perform network access.
+
 ### Add a raw-file signature
 
 Catalog-only additions do not require another orchestrator:
@@ -544,25 +549,28 @@ src/
     │   ├── outputs/
     │   │   ├── config.rs           process dump layout and filenames
     │   │   └── process_triage_saves.rs
+    │   ├── procedures/
+    │   │   ├── debuginfo/
+    │   │   │   ├── dbi.rs          explicit local-PDB DBI source paths
+    │   │   │   └── pdb.rs          process main-module PDB metadata
+    │   │   ├── foundation/
+    │   │   │   └── validate_pe/
+    │   │   │       ├── AGENTS.md    local maintenance and performance guidance
+    │   │   │       ├── readme.md    validation pipeline and invariants
+    │   │   │       ├── mod.rs       validation types and module interface
+    │   │   │       ├── locations.rs section metadata and RVA/file locations
+    │   │   │       ├── parsing.rs   mapped PE parsing and structural validation
+    │   │   │       ├── process.rs   remote image identity and mapping validation
+    │   │   │       └── snapshot.rs  bounded image copying and unavailable ranges
+    │   │   └── imports/
+    │   │       ├── AGENTS.md       local maintenance and performance guidance
+    │   │       ├── readme.md       import parsing and IAT-xref pipeline
+    │   │       ├── mod.rs          import types and module interface
+    │   │       ├── collector.rs    import collection and result grouping
+    │   │       ├── parsing.rs      descriptors, thunks, names, and ordinals
+    │   │       └── xrefs.rs        direct IAT call and jump references
     │   └── utils/
-    │       ├── foundation/
-    │       │   └── validate_pe/
-    │       │       ├── AGENTS.md    local maintenance and performance guidance
-    │       │       ├── readme.md    validation pipeline and invariants
-    │       │       ├── mod.rs       validation types and module interface
-    │       │       ├── locations.rs section metadata and RVA/file locations
-    │       │       ├── parsing.rs   mapped PE parsing and structural validation
-    │       │       ├── process.rs   remote image identity and mapping validation
-    │       │       └── snapshot.rs  bounded image copying and unavailable ranges
-    │       ├── imports/
-    │       │   ├── AGENTS.md       local maintenance and performance guidance
-    │       │   ├── readme.md       import parsing and IAT-xref pipeline
-    │       │   ├── mod.rs          import types and module interface
-    │       │   ├── collector.rs    import collection and result grouping
-    │       │   ├── parsing.rs      descriptors, thunks, names, and ordinals
-    │       │   └── xrefs.rs        direct IAT call and jump references
     │       ├── mem.rs              memory reads and region queries
-    │       ├── pdb.rs              process main-module PDB metadata
     │       ├── process.rs          process, PEB, and main-module validation
     │       └── teb.rs              per-thread TEB collection
     ├── internal/

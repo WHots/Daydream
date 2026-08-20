@@ -92,8 +92,11 @@ information is not found in these.
     fast, direct implementations over unnecessary abstraction. `procedures/imports/` separates
     import collection, PE import parsing, and IAT xref scanning. Its local `readme.md`
     documents that pipeline, and its local `AGENTS.md` requires matching documentation
-    updates plus fast, single-pass implementations. `memutils.rs`, `pdbutils.rs`, `processutils.rs`,
-    and `tebutils.rs` provide the other retained process analysis helpers.
+    updates plus fast, single-pass implementations. `procedures/debuginfo/pdb.rs` collects
+    main-module CodeView/PDB metadata from validated process snapshots, while
+    `procedures/debuginfo/dbi.rs` collects owned source-path occurrences from the DBI
+    Sources substream of an explicitly supplied local PDB. `utils/mem.rs`,
+    `utils/process.rs`, and `utils/teb.rs` provide the other retained process analysis helpers.
 - `global_utils/` — general helpers usable anywhere: `fileutils` (file entropy, SHA-256 hashing).
 - `data/` — static tables: `patterns64/patterns64` for raw-file signature scanning.
 

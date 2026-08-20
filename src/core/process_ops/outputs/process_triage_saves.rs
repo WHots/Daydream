@@ -10,7 +10,7 @@ use crate::core::process_ops::process_processing::ProcessTriageCollection;
 use crate::core::process_ops::procedures::foundation::validate_pe::UnavailablePeRange;
 use crate::core::process_ops::procedures::imports::{PeIatXrefKind, ProcessImportCollectionError};
 use crate::core::process_ops::utils::mem::ProcessMemoryReadError;
-use crate::core::process_ops::utils::pdb::{PdbCodeViewFormat, PdbInfoCollectionError};
+use crate::core::process_ops::procedures::debuginfo::pdb::{PdbCodeViewFormat, PdbInfoCollectionError};
 use crate::core::process_ops::utils::teb::{ProcessTebCollectionError, ThreadTebCollectionError, ThreadTebInfo};
 
 /// Saves every retained process-triage result into its configured JSON location.

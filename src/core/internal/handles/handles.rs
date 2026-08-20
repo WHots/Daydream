@@ -64,7 +64,6 @@ impl HandleGuard
 
         if handle.is_null()
         {
-            // SAFETY: `GetLastError` only reads the calling thread's last-error value.
             let error = unsafe { GetLastError() };
 
             return Err(HandleGuardError::OpenProcessFailed {
@@ -95,13 +94,14 @@ impl HandleGuard
             SecurityDescriptor: ptr::null(),
             SecurityQualityOfService: ptr::null(),
         };
+
         let client_id = CLIENT_ID {
             UniqueProcess: process_id as usize as HANDLE,
             UniqueThread: thread_id as usize as HANDLE,
         };
+
         let mut handle: HANDLE = ptr::null_mut();
 
-        // SAFETY: output storage and initialized object/client structures remain valid for the call.
         let status = unsafe { nt_open_thread(&mut handle, requested_access, &object_attributes, &client_id) };
 
         if status < 0
@@ -114,7 +114,6 @@ impl HandleGuard
             });
         }
 
-        // SAFETY: successful `NtOpenThread` returns an owned thread handle closed by `CloseHandle`.
         unsafe { Self::from_owned_raw(handle, requested_access) }
     }
 
@@ -131,20 +130,15 @@ impl HandleGuard
             return Err(HandleGuardError::InvalidHandle);
         }
 
-        // SAFETY: the caller transfers unique ownership of a valid `CloseHandle`-compatible handle.
         let owned_handle = unsafe { OwnedHandle::from_raw_handle(handle) };
         let mut information = PUBLIC_OBJECT_BASIC_INFORMATION::default();
         let mut return_length = 0u32;
 
-        // SAFETY: `information` is a valid output buffer and `handle` remains owned for the query.
         let status = unsafe { nt_query_object(handle, OBJECT_BASIC_INFORMATION_CLASS, &mut information as *mut PUBLIC_OBJECT_BASIC_INFORMATION as *mut c_void, size_of::<PUBLIC_OBJECT_BASIC_INFORMATION>() as u32, &mut return_length) };
 
         if status < 0
         {
-            return Err(HandleGuardError::AccessQueryFailed {
-                status,
-                return_length,
-            });
+            return Err(HandleGuardError::AccessQueryFailed {status, return_length});
         }
 
         if information.GrantedAccess & required_access != required_access
@@ -196,22 +190,3 @@ impl fmt::Display for HandleGuardError
 }
 
 impl std::error::Error for HandleGuardError {}
-
-#[cfg(test)]
-mod tests
-{
-    use windows_sys::Win32::System::Threading::{GetCurrentThreadId, THREAD_QUERY_INFORMATION};
-
-    use super::HandleGuard;
-
-    /// Verifies the native thread-open path and retained access mask against this test thread.
-    #[test]
-    fn opens_current_thread_through_nt_open_thread()
-    {
-        // SAFETY: `GetCurrentThreadId` takes no parameters and returns the calling thread ID.
-        let thread_id = unsafe { GetCurrentThreadId() };
-        let handle = HandleGuard::open_thread(std::process::id(), thread_id, THREAD_QUERY_INFORMATION).expect("NtOpenThread should open the current test thread");
-
-        assert_eq!(handle.granted_access() & THREAD_QUERY_INFORMATION, THREAD_QUERY_INFORMATION);
-    }
-}

@@ -1,0 +1,44 @@
+{
+  "pdb": {
+    "age": 1,
+    "codeview_file_offset": 1179252,
+    "codeview_file_offset_hex": "0x11FE74",
+    "codeview_rva": 1183860,
+    "codeview_rva_hex": "0x121074",
+    "codeview_size": 37,
+    "codeview_size_hex": "0x25",
+    "debug_directory_file_offset": 1178896,
+    "debug_directory_file_offset_hex": "0x11FD10",
+    "debug_directory_rva": 1183504,
+    "debug_directory_rva_hex": "0x120F10",
+    "format": "rsds",
+    "guid": {
+      "data1": 2961714495,
+      "data2": 37137,
+      "data3": 17515,
+      "data4": [
+        134,
+        173,
+        17,
+        227,
+        154,
+        114,
+        201,
+        192
+      ],
+      "value": "B0882D3F-9111-446B-86AD-11E39A72C9C0"
+    },
+    "path": {
+      "directory": null,
+      "exists_on_disk": false,
+      "extension": "pdb",
+      "file_name": "daydream.pdb",
+      "file_stem": "daydream",
+      "full": "daydream.pdb"
+    },
+    "signature": null,
+    "signature_hex": null
+  },
+  "schema_version": 4,
+  "status": "found"
+}

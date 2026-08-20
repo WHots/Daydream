@@ -11,7 +11,7 @@ use crate::core::internal::handles::handles::{HandleGuard, HandleGuardError};
 use crate::core::process_ops::outputs::process_triage_saves::save_process_triage;
 use crate::core::process_ops::procedures::foundation::validate_pe::{self, PeSectionInfo, PeValidationError, UnavailablePeRange, ValidatedPeSnapshot};
 use crate::core::process_ops::procedures::imports::{collect_process_imports_from_snapshot, ProcessImportCollection, ProcessImportCollectionError};
-use crate::core::process_ops::utils::pdb::{self, PdbInfo, PdbInfoCollectionError};
+use crate::core::process_ops::procedures::debuginfo::pdb::{self, PdbInfo, PdbInfoCollectionError};
 use crate::core::process_ops::utils::process::{self, ProcessPeValidationError, ValidatedProcessPe};
 use crate::core::process_ops::utils::teb::{self, ProcessTebCollection, ProcessTebCollectionError};
 

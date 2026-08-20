@@ -50,6 +50,13 @@ mod core
 
         pub(crate) mod procedures
         {
+            pub(crate) mod debuginfo
+            {
+                #[allow(dead_code)]
+                pub(crate) mod dbi;
+                pub(crate) mod pdb;
+            }
+
             pub(crate) mod foundation
             {
                 pub(crate) mod validate_pe;
@@ -60,7 +67,6 @@ mod core
         pub(crate) mod utils
         {
             pub(crate) mod mem;
-            pub(crate) mod pdb;
             pub(crate) mod process;
             pub(crate) mod teb;
         }

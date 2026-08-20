@@ -323,14 +323,8 @@ fn build_path_info(full_path: Box<str>) -> PdbPathInfo
     let file_name = path.file_name().map(|value| value.to_string_lossy().into_owned().into_boxed_str()).filter(|value| !value.is_empty());
     let file_stem = path.file_stem().map(|value| value.to_string_lossy().into_owned().into_boxed_str()).filter(|value| !value.is_empty());
     let extension = path.extension().map(|value| value.to_string_lossy().into_owned().into_boxed_str()).filter(|value| !value.is_empty());
+
     let exists_on_disk = path.is_file();
 
-    PdbPathInfo {
-        full_path,
-        directory,
-        file_name,
-        file_stem,
-        extension,
-        exists_on_disk,
-    }
+    PdbPathInfo { full_path, directory, file_name, file_stem, extension, exists_on_disk }
 }

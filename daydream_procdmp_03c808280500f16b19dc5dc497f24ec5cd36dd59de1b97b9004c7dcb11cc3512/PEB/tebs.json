@@ -1,0 +1,223 @@
+{
+  "failure_count": 0,
+  "failures": [],
+  "process_id": 38632,
+  "process_id_hex": "0x96E8",
+  "schema_version": 4,
+  "status": "collected",
+  "teb_count": 4,
+  "tebs": [
+    {
+      "environment": {
+        "active_rpc_handle": 0,
+        "active_rpc_handle_hex": "0x0",
+        "client_process_id": 38632,
+        "client_process_id_hex": "0x96E8",
+        "client_thread_id": 7952,
+        "client_thread_id_hex": "0x1F10",
+        "environment_pointer": 0,
+        "environment_pointer_hex": "0x0",
+        "process_environment_block": 290617065472,
+        "process_environment_block_hex": "0x43AA208000",
+        "thread_local_storage_pointer": 1833828570384,
+        "thread_local_storage_pointer_hex": "0x1AAF8B35510"
+      },
+      "nt_tib": {
+        "arbitrary_user_pointer": 0,
+        "arbitrary_user_pointer_hex": "0x0",
+        "exception_list": 0,
+        "exception_list_hex": "0x0",
+        "fiber_data_or_version": 7680,
+        "fiber_data_or_version_hex": "0x1E00",
+        "self_address": 290617069568,
+        "self_address_hex": "0x43AA209000",
+        "stack_base": 290616311808,
+        "stack_base_hex": "0x43AA150000",
+        "stack_limit": 290616229888,
+        "stack_limit_hex": "0x43AA13C000",
+        "stack_size_bytes": 81920,
+        "stack_size_hex": "0x14000",
+        "subsystem_tib": 0,
+        "subsystem_tib_hex": "0x0"
+      },
+      "teb_address": 290617069568,
+      "teb_address_hex": "0x43AA209000",
+      "thread": {
+        "affinity_mask": 16777215,
+        "affinity_mask_hex": "0xFFFFFF",
+        "base_priority": 0,
+        "exit_status": 259,
+        "exit_status_hex": "0x00000103",
+        "priority": 8,
+        "thread_id": 7952,
+        "thread_id_hex": "0x1F10"
+      },
+      "trust": {
+        "client_process_id_matches": true,
+        "client_thread_id_matches": true,
+        "identity_matches": true,
+        "process_environment_block_matches": true,
+        "self_pointer_matches": true
+      }
+    },
+    {
+      "environment": {
+        "active_rpc_handle": 0,
+        "active_rpc_handle_hex": "0x0",
+        "client_process_id": 38632,
+        "client_process_id_hex": "0x96E8",
+        "client_thread_id": 11588,
+        "client_thread_id_hex": "0x2D44",
+        "environment_pointer": 0,
+        "environment_pointer_hex": "0x0",
+        "process_environment_block": 290617065472,
+        "process_environment_block_hex": "0x43AA208000",
+        "thread_local_storage_pointer": 0,
+        "thread_local_storage_pointer_hex": "0x0"
+      },
+      "nt_tib": {
+        "arbitrary_user_pointer": 0,
+        "arbitrary_user_pointer_hex": "0x0",
+        "exception_list": 0,
+        "exception_list_hex": "0x0",
+        "fiber_data_or_version": 7680,
+        "fiber_data_or_version_hex": "0x1E00",
+        "self_address": 290617085952,
+        "self_address_hex": "0x43AA20D000",
+        "stack_base": 290621227008,
+        "stack_base_hex": "0x43AA600000",
+        "stack_limit": 290621218816,
+        "stack_limit_hex": "0x43AA5FE000",
+        "stack_size_bytes": 8192,
+        "stack_size_hex": "0x2000",
+        "subsystem_tib": 0,
+        "subsystem_tib_hex": "0x0"
+      },
+      "teb_address": 290617085952,
+      "teb_address_hex": "0x43AA20D000",
+      "thread": {
+        "affinity_mask": 16777215,
+        "affinity_mask_hex": "0xFFFFFF",
+        "base_priority": 0,
+        "exit_status": 259,
+        "exit_status_hex": "0x00000103",
+        "priority": 8,
+        "thread_id": 11588,
+        "thread_id_hex": "0x2D44"
+      },
+      "trust": {
+        "client_process_id_matches": true,
+        "client_thread_id_matches": true,
+        "identity_matches": true,
+        "process_environment_block_matches": true,
+        "self_pointer_matches": true
+      }
+    },
+    {
+      "environment": {
+        "active_rpc_handle": 0,
+        "active_rpc_handle_hex": "0x0",
+        "client_process_id": 38632,
+        "client_process_id_hex": "0x96E8",
+        "client_thread_id": 16696,
+        "client_thread_id_hex": "0x4138",
+        "environment_pointer": 0,
+        "environment_pointer_hex": "0x0",
+        "process_environment_block": 290617065472,
+        "process_environment_block_hex": "0x43AA208000",
+        "thread_local_storage_pointer": 0,
+        "thread_local_storage_pointer_hex": "0x0"
+      },
+      "nt_tib": {
+        "arbitrary_user_pointer": 0,
+        "arbitrary_user_pointer_hex": "0x0",
+        "exception_list": 0,
+        "exception_list_hex": "0x0",
+        "fiber_data_or_version": 7680,
+        "fiber_data_or_version_hex": "0x1E00",
+        "self_address": 290617094144,
+        "self_address_hex": "0x43AA20F000",
+        "stack_base": 290622275584,
+        "stack_base_hex": "0x43AA700000",
+        "stack_limit": 290622267392,
+        "stack_limit_hex": "0x43AA6FE000",
+        "stack_size_bytes": 8192,
+        "stack_size_hex": "0x2000",
+        "subsystem_tib": 0,
+        "subsystem_tib_hex": "0x0"
+      },
+      "teb_address": 290617094144,
+      "teb_address_hex": "0x43AA20F000",
+      "thread": {
+        "affinity_mask": 16777215,
+        "affinity_mask_hex": "0xFFFFFF",
+        "base_priority": 0,
+        "exit_status": 259,
+        "exit_status_hex": "0x00000103",
+        "priority": 8,
+        "thread_id": 16696,
+        "thread_id_hex": "0x4138"
+      },
+      "trust": {
+        "client_process_id_matches": true,
+        "client_thread_id_matches": true,
+        "identity_matches": true,
+        "process_environment_block_matches": true,
+        "self_pointer_matches": true
+      }
+    },
+    {
+      "environment": {
+        "active_rpc_handle": 0,
+        "active_rpc_handle_hex": "0x0",
+        "client_process_id": 38632,
+        "client_process_id_hex": "0x96E8",
+        "client_thread_id": 37420,
+        "client_thread_id_hex": "0x922C",
+        "environment_pointer": 0,
+        "environment_pointer_hex": "0x0",
+        "process_environment_block": 290617065472,
+        "process_environment_block_hex": "0x43AA208000",
+        "thread_local_storage_pointer": 0,
+        "thread_local_storage_pointer_hex": "0x0"
+      },
+      "nt_tib": {
+        "arbitrary_user_pointer": 0,
+        "arbitrary_user_pointer_hex": "0x0",
+        "exception_list": 0,
+        "exception_list_hex": "0x0",
+        "fiber_data_or_version": 7680,
+        "fiber_data_or_version_hex": "0x1E00",
+        "self_address": 290617077760,
+        "self_address_hex": "0x43AA20B000",
+        "stack_base": 290620178432,
+        "stack_base_hex": "0x43AA500000",
+        "stack_limit": 290620166144,
+        "stack_limit_hex": "0x43AA4FD000",
+        "stack_size_bytes": 12288,
+        "stack_size_hex": "0x3000",
+        "subsystem_tib": 0,
+        "subsystem_tib_hex": "0x0"
+      },
+      "teb_address": 290617077760,
+      "teb_address_hex": "0x43AA20B000",
+      "thread": {
+        "affinity_mask": 16777215,
+        "affinity_mask_hex": "0xFFFFFF",
+        "base_priority": 0,
+        "exit_status": 259,
+        "exit_status_hex": "0x00000103",
+        "priority": 8,
+        "thread_id": 37420,
+        "thread_id_hex": "0x922C"
+      },
+      "trust": {
+        "client_process_id_matches": true,
+        "client_thread_id_matches": true,
+        "identity_matches": true,
+        "process_environment_block_matches": true,
+        "self_pointer_matches": true
+      }
+    }
+  ]
+}
