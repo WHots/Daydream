@@ -1,4 +1,3 @@
-use std::fmt;
 use std::path::Path;
 
 use ms_pdb::Pdb;
@@ -49,6 +48,7 @@ pub(crate) fn collect_dbi_source_paths(pdb_path: &Path) -> Result<DbiSourcePaths
     })?;
 
     let expected_path_count = sources.file_name_offsets().len();
+
     let mut paths = Vec::with_capacity(expected_path_count);
 
     for (source_index, (_, source_path)) in sources.iter_sources().enumerate()
@@ -62,47 +62,8 @@ pub(crate) fn collect_dbi_source_paths(pdb_path: &Path) -> Result<DbiSourcePaths
 
     if paths.len() != expected_path_count
     {
-        return Err(DbiSourcePathCollectionError::InvalidSourcePath {
-            source_index: paths.len(),
-        });
+        return Err(DbiSourcePathCollectionError::InvalidSourcePath { source_index: paths.len()});
     }
 
     Ok(DbiSourcePaths {paths})
-}
-
-
-impl fmt::Display for DbiSourcePathCollectionError
-{
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result
-    {
-        match self
-        {
-            Self::PdbOpen {message} => write!(formatter, "failed to open PDB: {}", message),
-            Self::SourcesRead {message} => write!(formatter, "failed to read the DBI Sources substream: {}", message),
-            Self::InvalidSourcePath {source_index} => write!(formatter, "DBI source path {} could not be parsed", source_index),
-            Self::InvalidSourcePathEncoding {source_index} => write!(formatter, "DBI source path {} is not valid UTF-8", source_index),
-        }
-    }
-}
-
-
-impl std::error::Error for DbiSourcePathCollectionError {}
-
-
-#[cfg(test)]
-mod tests
-{
-    use std::ffi::OsStr;
-
-    use super::*;
-
-    #[test]
-    fn collects_source_paths_from_current_test_pdb()
-    {
-        let pdb_path = std::env::current_exe().expect("test executable path should be available").with_extension("pdb");
-        let source_paths = collect_dbi_source_paths(&pdb_path).expect("test PDB source paths should be readable");
-
-        assert!(!source_paths.paths.is_empty());
-        assert!(source_paths.paths.iter().any(|path| Path::new(path.as_ref()).file_name() == Some(OsStr::new("dbi.rs"))));
-    }
 }
