@@ -13,10 +13,14 @@ mod core
             pub(crate) mod file_triage_saves;
         }
 
+        pub(crate) mod procedures
+        {
+            pub(crate) mod imports;
+            pub(crate) mod pdb;
+        }
+
         pub(crate) mod utils
         {
-            pub(crate) mod apis;
-            pub(crate) mod pdb;
             pub(crate) mod scanning;
             pub(crate) mod sections;
             pub(crate) mod strings;
@@ -136,7 +140,7 @@ fn main() -> ExitCode
 
     if target_mode == "-f"
     {
-        return match process_file(Path::new(&target), false)
+        return match process_file(Path::new(&target))
         {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) =>

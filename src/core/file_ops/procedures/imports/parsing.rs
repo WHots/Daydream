@@ -1,6 +1,4 @@
-use std::collections::{HashMap, HashSet};
-use std::fmt;
-
+use crate::core::file_ops::procedures::imports::types::FileApiImport;
 use crate::core::file_ops::utils::supports::{read_u16, read_u32, read_u64, rva_to_file_range};
 use crate::core::file_ops::utils::validate::ValidatedPeFile;
 
@@ -14,90 +12,6 @@ const IMPORT_DESCRIPTOR_SIZE: usize = 20;
 const IMPORT_LOOKUP_ENTRY_SIZE: usize = 8;
 const IMPORT_BY_NAME_HINT_SIZE: usize = 2;
 const IMAGE_ORDINAL_FLAG64: u64 = 0x8000_0000_0000_0000;
-const IMAGE_SCN_MEM_EXECUTE: u32 = 0x2000_0000;
-
-/// Describes the instruction form used by one supported API IAT cross-reference.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FileApiXrefKind
-{
-    Call,
-    Jump,
-}
-
-
-/// Describes one direct IAT reference or near reference to an import thunk.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FileApiXref
-{
-    pub kind: FileApiXrefKind,
-    pub rva: usize,
-    pub file_offset: usize,
-}
-
-
-/// Contains one PE import and its direct or thunk-mediated call and jump references.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FileApiImport
-{
-    pub library_name: Box<str>,
-    pub import_name: Box<str>,
-    pub iat_rva: usize,
-    pub file_offset: Option<usize>,
-    pub xrefs: Vec<FileApiXref>,
-}
-
-
-/// Collects imports and their supported x64 IAT call or jump references from a raw PE file.
-/// `file`: the validated EXE or DLL whose import directory and executable sections should be read.
-///
-/// Returns every normal name or ordinal import with its IAT file offset, direct
-/// `FF /2` calls and `FF /4` jumps, and near calls or jumps to matching import thunks.
-pub fn collect_file_api_imports(file: &ValidatedPeFile) -> Vec<FileApiImport>
-{
-    let mut imports = collect_imports(file);
-
-    if imports.is_empty()
-    {
-        return imports;
-    }
-
-    let iat_rvas: HashSet<usize> = imports.iter().map(|api_import| api_import.iat_rva).collect();
-    let mut xrefs_by_iat = collect_iat_xrefs(file, &iat_rvas);
-
-    for api_import in &mut imports
-    {
-        api_import.xrefs = xrefs_by_iat.remove(&api_import.iat_rva).unwrap_or_default();
-    }
-
-    imports
-}
-
-impl fmt::Display for FileApiImport
-{
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result
-    {
-        match self.file_offset
-        {
-            Some(file_offset) => write!(formatter, "{}!{}: File offset 0x{:08X} | IAT RVA 0x{:08X}", self.library_name, self.import_name, file_offset, self.iat_rva),
-            None => write!(formatter, "{}!{}: File offset N/A | IAT RVA 0x{:08X}", self.library_name, self.import_name, self.iat_rva),
-        }
-    }
-}
-
-impl fmt::Display for FileApiXref
-{
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result
-    {
-        let kind = match self.kind
-        {
-            FileApiXrefKind::Call => "Call",
-            FileApiXrefKind::Jump => "Jump",
-        };
-
-        write!(formatter, "{} XREF: RVA 0x{:08X}, File offset 0x{:08X}", kind, self.rva, self.file_offset)
-    }
-}
-
 
 /// Collects every normal name or ordinal import before xrefs are attached.
 /// `file`: the validated EXE or DLL whose import directory should be read.
@@ -105,14 +19,16 @@ impl fmt::Display for FileApiXref
 /// Returns the parsed imports; empty when the import directory is missing,
 /// out of bounds, or contains no readable descriptors. Failures are reported
 /// on stderr.
-fn collect_imports(file: &ValidatedPeFile) -> Vec<FileApiImport>
+pub(super) fn collect_imports(file: &ValidatedPeFile) -> Vec<FileApiImport>
 {
     let (import_directory_rva, import_directory_size) = match get_import_directory(file)
     {
         Some(value) => value,
         None => return Vec::new(),
     };
+
     let descriptor_count = (import_directory_size / IMPORT_DESCRIPTOR_SIZE).min(file.bytes.len() / IMPORT_DESCRIPTOR_SIZE);
+
     let mut imports = Vec::new();
 
     for descriptor_index in 0..descriptor_count
@@ -126,6 +42,7 @@ fn collect_imports(file: &ValidatedPeFile) -> Vec<FileApiImport>
                 break;
             }
         };
+
         let descriptor = match read_mapped_bytes(file, descriptor_rva, IMPORT_DESCRIPTOR_SIZE)
         {
             Some(value) => value,
@@ -135,6 +52,7 @@ fn collect_imports(file: &ValidatedPeFile) -> Vec<FileApiImport>
                 break;
             }
         };
+
         let original_first_thunk = read_u32(descriptor, 0).unwrap_or(0) as usize;
         let library_name_rva = read_u32(descriptor, 12).unwrap_or(0) as usize;
         let first_thunk = read_u32(descriptor, 16).unwrap_or(0) as usize;
@@ -210,6 +128,7 @@ fn collect_descriptor_imports(file: &ValidatedPeFile, library_name: Box<str>, lo
         {
             format!("#{}", thunk_value & 0xFFFF).into_boxed_str()
         }
+
         else
         {
             let import_by_name_rva = match usize::try_from(thunk_value)
@@ -221,6 +140,7 @@ fn collect_descriptor_imports(file: &ValidatedPeFile, library_name: Box<str>, lo
                     continue;
                 }
             };
+
             let function_name_rva = match import_by_name_rva.checked_add(IMPORT_BY_NAME_HINT_SIZE)
             {
                 Some(value) => value,
@@ -241,6 +161,7 @@ fn collect_descriptor_imports(file: &ValidatedPeFile, library_name: Box<str>, lo
                 }
             }
         };
+        
         let iat_rva = match thunk_index.checked_mul(IMPORT_LOOKUP_ENTRY_SIZE).and_then(|offset| first_thunk_rva.checked_add(offset))
         {
             Some(value) => value,
@@ -259,205 +180,6 @@ fn collect_descriptor_imports(file: &ValidatedPeFile, library_name: Box<str>, lo
             xrefs: Vec::new(),
         });
     }
-}
-
-
-/// Collects direct IAT references and near references to matching import thunks.
-/// `file`: the validated EXE or DLL whose executable sections should be scanned.
-/// `iat_rvas`: the IAT entry RVAs to match displacement targets against.
-///
-/// Returns per-IAT xref lists, sorted and deduplicated; RVAs with no supported
-/// references have no entry, and unscannable sections are skipped and reported
-/// on stderr.
-fn collect_iat_xrefs(file: &ValidatedPeFile, iat_rvas: &HashSet<usize>) -> HashMap<usize, Vec<FileApiXref>>
-{
-    let mut xrefs_by_iat: HashMap<usize, Vec<FileApiXref>> = HashMap::new();
-    let mut thunk_iat_by_rva = HashMap::new();
-
-    for section in file.sections.iter()
-    {
-        if section.characteristics & IMAGE_SCN_MEM_EXECUTE == 0 || section.raw_size == 0
-        {
-            continue;
-        }
-
-        let section_end = match section.raw_offset.checked_add(section.raw_size)
-        {
-            Some(value) if value <= file.bytes.len() => value,
-            _ =>
-            {
-                eprintln!("executable section at RVA 0x{:08X} has raw data outside the file", section.virtual_address);
-                continue;
-            }
-        };
-        let mut opcode_file_offset = section.raw_offset;
-
-        while opcode_file_offset.checked_add(6).is_some_and(|instruction_end| instruction_end <= section_end)
-        {
-            if file.bytes[opcode_file_offset] != 0xFF
-            {
-                opcode_file_offset += 1;
-                continue;
-            }
-
-            let kind = match file.bytes[opcode_file_offset + 1]
-            {
-                0x15 => FileApiXrefKind::Call,
-                0x25 => FileApiXrefKind::Jump,
-                _ =>
-                {
-                    opcode_file_offset += 1;
-                    continue;
-                }
-            };
-            let displacement = i32::from_le_bytes([file.bytes[opcode_file_offset + 2], file.bytes[opcode_file_offset + 3], file.bytes[opcode_file_offset + 4], file.bytes[opcode_file_offset + 5]]);
-            let opcode_delta = match opcode_file_offset.checked_sub(section.raw_offset)
-            {
-                Some(value) => value,
-                None =>
-                {
-                    eprintln!("opcode file offset 0x{:08X} fell below its section start", opcode_file_offset);
-                    break;
-                }
-            };
-            let opcode_rva = match section.virtual_address.checked_add(opcode_delta)
-            {
-                Some(value) => value,
-                None =>
-                {
-                    eprintln!("opcode RVA overflowed at file offset 0x{:08X}", opcode_file_offset);
-                    break;
-                }
-            };
-            let next_instruction_rva = match opcode_rva.checked_add(6)
-            {
-                Some(value) => value,
-                None =>
-                {
-                    eprintln!("next-instruction RVA overflowed after RVA 0x{:08X}", opcode_rva);
-                    break;
-                }
-            };
-            let iat_rva = match next_instruction_rva.checked_add_signed(displacement as isize)
-            {
-                Some(value) => value,
-                None =>
-                {
-                    opcode_file_offset += 6;
-                    continue;
-                }
-            };
-
-            if iat_rvas.contains(&iat_rva)
-            {
-                let instruction_file_offset = if opcode_file_offset > section.raw_offset && matches!(file.bytes[opcode_file_offset - 1], 0x40..=0x4F) { opcode_file_offset - 1 } else { opcode_file_offset };
-                let instruction_delta = instruction_file_offset - section.raw_offset;
-                let instruction_rva = match section.virtual_address.checked_add(instruction_delta)
-                {
-                    Some(value) => value,
-                    None =>
-                    {
-                        eprintln!("instruction RVA overflowed at file offset 0x{:08X}", instruction_file_offset);
-                        opcode_file_offset += 6;
-                        continue;
-                    }
-                };
-
-                if kind == FileApiXrefKind::Jump
-                {
-                    thunk_iat_by_rva.insert(instruction_rva, iat_rva);
-                }
-
-                xrefs_by_iat.entry(iat_rva).or_default().push(FileApiXref {
-                    kind,
-                    rva: instruction_rva,
-                    file_offset: instruction_file_offset,
-                });
-            }
-
-            opcode_file_offset += 6;
-        }
-    }
-
-    if !thunk_iat_by_rva.is_empty()
-    {
-        for section in file.sections.iter()
-        {
-            if section.characteristics & IMAGE_SCN_MEM_EXECUTE == 0 || section.raw_size == 0
-            {
-                continue;
-            }
-
-            let section_end = match section.raw_offset.checked_add(section.raw_size)
-            {
-                Some(value) if value <= file.bytes.len() => value,
-                _ => continue,
-            };
-            let mut opcode_file_offset = section.raw_offset;
-
-            while opcode_file_offset.checked_add(5).is_some_and(|instruction_end| instruction_end <= section_end)
-            {
-                let kind = match file.bytes[opcode_file_offset]
-                {
-                    0xE8 => FileApiXrefKind::Call,
-                    0xE9 => FileApiXrefKind::Jump,
-                    _ =>
-                    {
-                        opcode_file_offset += 1;
-                        continue;
-                    }
-                };
-                let displacement = i32::from_le_bytes([file.bytes[opcode_file_offset + 1], file.bytes[opcode_file_offset + 2], file.bytes[opcode_file_offset + 3], file.bytes[opcode_file_offset + 4]]);
-                let opcode_delta = opcode_file_offset - section.raw_offset;
-                let opcode_rva = match section.virtual_address.checked_add(opcode_delta)
-                {
-                    Some(value) => value,
-                    None =>
-                    {
-                        eprintln!("opcode RVA overflowed at file offset 0x{:08X}", opcode_file_offset);
-                        break;
-                    }
-                };
-                let next_instruction_rva = match opcode_rva.checked_add(5)
-                {
-                    Some(value) => value,
-                    None =>
-                    {
-                        eprintln!("next-instruction RVA overflowed after RVA 0x{:08X}", opcode_rva);
-                        break;
-                    }
-                };
-                let target_rva = match next_instruction_rva.checked_add_signed(displacement as isize)
-                {
-                    Some(value) => value,
-                    None =>
-                    {
-                        opcode_file_offset += 5;
-                        continue;
-                    }
-                };
-
-                if let Some(iat_rva) = thunk_iat_by_rva.get(&target_rva)
-                {
-                    xrefs_by_iat.entry(*iat_rva).or_default().push(FileApiXref {
-                        kind,
-                        rva: opcode_rva,
-                        file_offset: opcode_file_offset,
-                    });
-                }
-
-                opcode_file_offset += 5;
-            }
-        }
-    }
-
-    for xrefs in xrefs_by_iat.values_mut()
-    {
-        xrefs.sort_unstable_by_key(|xref| (xref.rva, xref.file_offset));
-        xrefs.dedup();
-    }
-
-    xrefs_by_iat
 }
 
 

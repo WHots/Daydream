@@ -1,5 +1,3 @@
-use std::fmt;
-
 use crate::core::file_ops::utils::validate::ValidatedPeFile;
 
 const IMAGE_SCN_CNT_CODE: u32 = 0x0000_0020;
@@ -72,46 +70,6 @@ pub fn collect_file_sections(file: &ValidatedPeFile) -> Vec<PeSectionInfo>
 
     sections
 }
-
-impl fmt::Display for PeSectionContent
-{
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result
-    {
-        let name = match self
-        {
-            Self::Code => "Code",
-            Self::InitializedData => "Initialized data",
-            Self::UninitializedData => "Uninitialized data",
-        };
-
-        formatter.write_str(name)
-    }
-}
-
-impl fmt::Display for PeSectionMemory
-{
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result
-    {
-        let readable = if self.readable { 'R' } else { '-' };
-        let writable = if self.writable { 'W' } else { '-' };
-        let executable = if self.executable { 'X' } else { '-' };
-
-        write!(formatter, "{}{}{}", readable, writable, executable)?;
-
-        if self.shared
-        {
-            write!(formatter, " shared")?;
-        }
-
-        if self.discardable
-        {
-            write!(formatter, " discardable")?;
-        }
-
-        Ok(())
-    }
-}
-
 
 /// Collects every declared content type from PE section characteristics.
 fn collect_section_content(characteristics: u32) -> Vec<PeSectionContent>

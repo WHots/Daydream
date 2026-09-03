@@ -5,14 +5,13 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::core::file_ops::outputs::configs::prepare_file_triage_layout;
-use crate::core::file_ops::utils::apis::{collect_file_api_imports, FileApiImport, FileApiXrefKind};
-use crate::core::file_ops::utils::pdb::{collect_file_debug_directory, FileCodeViewInfo, FileDebugDetails, FileDebugEntry, MAX_DEBUG_DIRECTORY_ENTRIES};
+use crate::core::file_ops::procedures::imports::{collect_file_api_imports, FileApiImport, FileApiXrefKind};
+use crate::core::file_ops::procedures::pdb::{collect_file_debug_directory, FileCodeViewInfo, FileDebugDetails, FileDebugEntry, FileDebugType, MAX_DEBUG_DIRECTORY_ENTRIES};
 use crate::core::file_ops::utils::scanning::{scan_file_signatures, FileSignatureHit};
-use crate::core::file_ops::utils::sections::{collect_file_sections, PeSectionInfo};
-use crate::core::file_ops::utils::strings::{collect_file_strings, FileString};
+use crate::core::file_ops::utils::sections::{collect_file_sections, PeSectionContent, PeSectionInfo};
+use crate::core::file_ops::utils::strings::{collect_file_strings, FileString, StringEncoding};
 use crate::core::file_ops::utils::validate::ValidatedPeFile;
 use crate::core::global_utils::fileutils::{get_file_entropy, get_file_sha256, write_json_file};
-use crate::core::file_ops::utils::strings::StringEncoding;
 
 /// Number of bytes represented by one binary megabyte in saved size fields.
 const BYTES_PER_MEGABYTE: f64 = 1024.0 * 1024.0;
@@ -33,7 +32,7 @@ pub struct FileTriageCollection<'a>
 /// `file`: the validated image shared by each collector.
 /// `minimum_string_chars`: the minimum decoded character count stored for strings.
 ///
-/// Returns one collection bundle suitable for console display and JSON persistence.
+/// Returns one collection bundle suitable for JSON persistence.
 pub fn collect_file_triage(file: &ValidatedPeFile, minimum_string_chars: usize) -> FileTriageCollection<'_>
 {
     FileTriageCollection {
@@ -140,7 +139,7 @@ fn build_sections_json(sections: &[PeSectionInfo]) -> Value
         .iter()
         .enumerate()
         .map(|(index, section)| {
-            let content = section.content.iter().map(ToString::to_string).collect::<Vec<String>>();
+            let content = section.content.iter().map(|value| section_content_name(*value)).collect::<Vec<&str>>();
 
             json!
             ({
@@ -254,7 +253,7 @@ fn build_debug_directory_json(entries: &[FileDebugEntry<'_>]) -> Value
                 "type":
 
               {
-                    "name": entry.debug_type.to_string(),
+                    "name": file_debug_type_name(entry.debug_type),
                     "raw": entry.raw_type
                 },
                 "entry_location":
@@ -592,6 +591,55 @@ fn api_xref_kind_name(kind: FileApiXrefKind) -> &'static str
     {
         FileApiXrefKind::Call => "call",
         FileApiXrefKind::Jump => "jump",
+    }
+}
+
+
+/// Returns the stable JSON name for one PE section content classification.
+/// `content`: the collected section content classification.
+///
+/// Returns the analyst-facing JSON label.
+fn section_content_name(content: PeSectionContent) -> &'static str
+{
+    match content
+    {
+        PeSectionContent::Code => "Code",
+        PeSectionContent::InitializedData => "Initialized data",
+        PeSectionContent::UninitializedData => "Uninitialized data",
+    }
+}
+
+
+/// Returns the stable JSON name for one PE debug-directory type.
+/// `debug_type`: the collected debug-directory type classification.
+///
+/// Returns the analyst-facing JSON label.
+fn file_debug_type_name(debug_type: FileDebugType) -> &'static str
+{
+    match debug_type
+    {
+        FileDebugType::Unknown => "Unknown",
+        FileDebugType::Coff => "COFF",
+        FileDebugType::CodeView => "CodeView",
+        FileDebugType::Fpo => "FPO",
+        FileDebugType::Misc => "Misc",
+        FileDebugType::Exception => "Exception",
+        FileDebugType::Fixup => "Fixup",
+        FileDebugType::OmapToSource => "OMAP to source",
+        FileDebugType::OmapFromSource => "OMAP from source",
+        FileDebugType::Borland => "Borland",
+        FileDebugType::Reserved10 => "Reserved/BBT",
+        FileDebugType::Clsid => "CLSID",
+        FileDebugType::VcFeature => "VC feature",
+        FileDebugType::Pogo => "POGO",
+        FileDebugType::Iltcg => "ILTCG",
+        FileDebugType::Mpx => "MPX",
+        FileDebugType::Reproducible => "Reproducible",
+        FileDebugType::EmbeddedPortablePdb => "Embedded Portable PDB",
+        FileDebugType::Spgo => "SPGO",
+        FileDebugType::PdbChecksum => "PDB checksum",
+        FileDebugType::ExtendedDllCharacteristics => "Extended DLL characteristics",
+        FileDebugType::Other(_) => "Other",
     }
 }
 

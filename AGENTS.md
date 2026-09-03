@@ -78,9 +78,14 @@ information is not found in these.
 
 - `file_ops/` — operations on raw PE files on disk (never attaches to another process):
   - `utils/validate.rs` (validates an x64 PE, owns `ValidatedPeFile`), `utils/sections.rs`
-    (section content / memory traits), `utils/apis.rs` (import table + IAT call/jump xrefs),
-    `utils/pdb.rs` (CodeView/NB10 debug directory → PDB GUID/path), `utils/strings.rs`
-    (ASCII/UTF-8/UTF-16LE string extraction).
+    (section content / memory traits), and `utils/strings.rs` (ASCII/UTF-8/UTF-16LE
+    string extraction).
+  - `procedures/imports/` separates raw import collection, PE import parsing, direct
+    IAT xref scanning, and the public data types used by file triage. Its local
+    `README.md` documents the complete parsing, xref, failure, and output workflow.
+  - `procedures/pdb/` separates raw debug-directory collection, typed payload parsing,
+    CodeView/NB10 parsing, and the public data types used by file triage. Its local
+    `README.md` documents payload layouts, limits, failure states, and output integration.
 - `internal/` — logic local to this process only (never touches other processes):
   - `imports/imports.rs`, `utils/handles.rs` (`CleanHandle` RAII handle wrapper).
 - `process_ops/` — operations acting on a target process:

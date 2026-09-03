@@ -120,7 +120,7 @@ Raw-file mode follows this sequence:
 2. `collect_file_triage` lends that one validated object to the section, import/IAT,
    debug-directory, signature, and string collectors. Collectors do not reopen or execute
    the target.
-3. `process_file` prints the human-readable summary.
+3. `process_file` orchestrates collection and persistence without success-path console output.
 4. `save_file_triage` computes SHA-256 and Shannon entropy, creates the output layout,
    and serializes each result as pretty JSON.
 
@@ -244,16 +244,20 @@ Current file collectors include:
 - Strict x64 PE validation.
 - File identity, SHA-256, Shannon entropy, raw size, and PE header metadata.
 - Section layout, content classification, memory traits, RVA, and file offsets.
-- Standard imports and supported direct IAT call/jump references.
-- Debug-directory inspection and typed debug payload metadata.
+- Standard imports and supported direct or thunk-mediated IAT call/jump references.
+  The complete raw-file flow is documented in
+  [`imports/README.md`](src/core/file_ops/procedures/imports/README.md).
+- Debug-directory inspection and typed debug payload metadata. Payload formats,
+  safety budgets, and result states are documented in
+  [`pdb/README.md`](src/core/file_ops/procedures/pdb/README.md).
 - `RSDS`, `NB10`, POGO, VC feature, reproducible-build, checksum, miscellaneous, and
   embedded portable PDB-related records where supported.
 - ASCII, UTF-8, and UTF-16LE string extraction.
 - Wildcard-aware scanning of every raw-backed executable section through
   `X64_FILE_SCAN_SIGNATURES`, retaining repeated and overlapping matches.
 
-File mode currently prints its collected summary to the console and also saves organized
-JSON output.
+File mode keeps the terminal quiet on success and saves organized JSON output. Failures
+remain visible through stderr diagnostics.
 
 ## Requirements
 
@@ -447,18 +451,17 @@ There are three common ways to plug new behavior into the current codebase.
 
 ### Add a raw-file collector
 
-1. Put parsing logic under `src/core/file_ops/utils/` and make it consume
-   `&ValidatedPeFile`. Use the checked byte/RVA helpers in `supports.rs` before adding new
-   offset arithmetic.
-2. Declare the module in the `core::file_ops::utils` tree in `src/main.rs`; this project
-   currently uses an inline module tree rather than `mod.rs` files.
+1. Put raw-file workflows under `src/core/file_ops/procedures/` and shared low-level
+   helpers under `src/core/file_ops/utils/`. Make collectors consume `&ValidatedPeFile`
+   and use the checked byte/RVA helpers in `supports.rs` before adding new offset arithmetic.
+2. Declare the module in the matching `core::file_ops` tree in `src/main.rs`.
 3. Add the collector result to `FileTriageCollection` and invoke it once in
    `collect_file_triage`.
 4. Add its JSON builder and write call in `file_triage_saves.rs`. If it needs a new output
    directory, extend `FileTriageLayout` and `prepare_file_triage_layout` in `configs.rs`.
-5. Add console presentation in `file_processing.rs` only when an interactive summary is
-   useful; JSON is the integration surface for full results.
-6. Add focused parser/range tests and run the checks in [Build and test](#build-and-test).
+5. Use JSON as the integration surface; raw-file success output is not printed to the
+   console.
+6. Run the checks in [Build and test](#build-and-test).
 
 This path should never open, attach to, or execute the target.
 
@@ -532,13 +535,26 @@ src/
     │   └── patterns64/
     │       └── patterns64.rs       wildcard-aware x64 signature catalog
     ├── file_ops/
-    │   ├── file_processing.rs      raw-file orchestration and console presentation
+    │   ├── file_processing.rs      raw-file orchestration and error propagation
     │   ├── outputs/
     │   │   ├── configs.rs          raw-file output layout
     │   │   └── file_triage_saves.rs
+    │   ├── procedures/
+    │   │   ├── imports/
+    │   │   │   ├── README.md        raw-file import and IAT-xref pipeline
+    │   │   │   ├── mod.rs           raw-file import procedure interface
+    │   │   │   ├── collector.rs     import and IAT-xref orchestration
+    │   │   │   ├── parsing.rs       PE import-directory parsing
+    │   │   │   ├── types.rs         import and xref result types
+    │   │   │   └── xrefs.rs         direct IAT call and jump references
+    │   │   └── pdb/
+    │   │       ├── README.md        raw-file debug/PDB metadata pipeline
+    │   │       ├── mod.rs           raw-file PDB procedure interface
+    │   │       ├── collector.rs     debug-directory collection
+    │   │       ├── codeview.rs      RSDS and NB10 parsing
+    │   │       ├── payloads.rs      typed debug-payload parsers and limits
+    │   │       └── types.rs         raw-file debug-directory result types
     │   └── utils/
-    │       ├── apis.rs             imports and direct IAT references
-    │       ├── pdb.rs              debug-directory and CodeView parsing
     │       ├── scanning.rs         executable-section signature scanning
     │       ├── sections.rs         section metadata and traits
     │       ├── strings.rs          raw-file string collection
